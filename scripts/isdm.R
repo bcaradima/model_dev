@@ -1,13 +1,13 @@
-# Fit and cross-validate the individual models,
-# deploy the joint models using deploy.jsdm()
+### INDIVIDUAL MODELS ####
+# Description: this script selects influence factors, fits and validates the individual models, and outputs equivalent joint model workspaces using the deploy.jsdm() function. Most of these operations are purely for paper 1.
 
-# > SELECT influence factors ####
+# > Select influence factors ####
 # Predictors for paper 1 (BDM species)
 K <- c("Temp", "Temp2", "FV", "F10m", "IAR", "Urban", "LUD")
 predictors <- prepare.inputs(K, sample.bdms, center=TRUE)
-write.csv(predictors, "outputs/predictors.csv", row.names = F)
+write.csv(predictors, "outputs/predictors_p1.csv", row.names = F)
 
-# Predictors for variable selection (paper 2, all programs)
+# Predictors for variable selection per dataset (paper 2)
 predictors.vs <- prepare.inputs(c("A10m","A100m","A1km","A.EDO","IAR","TU.Dm","TU.Cr","LUD","Urban","UI","F10m","F100m","F1km", "p_forest", "F.EDO","bFRI","FRI","Temp","FV","WV","BM","Morph","WW","HP","Temp2","Noise"), sample.bdmf, center = TRUE)
 write.csv(predictors.vs, 'outputs/predictors_vs_bdmf.csv', row.names = F)
 

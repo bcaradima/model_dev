@@ -1,4 +1,6 @@
 ### > PRE-PROCESSING ####
+# Description: this script pre-processes the input data and prepares potential influence factors for the models.
+
 # Taxonomy ####
 inputs$taxonomy <- data.table(inputs$taxonomy)
 
@@ -341,9 +343,10 @@ p <- left_join(p, hp, by=c("SiteId", "SampId"))
 rm(hp)
 
 # Substrates ####
+# Substrates are only available for BDM sites
 # So perhaps it would be better to just try 1. "mobile blocs>250mm +  coarse sediments (25-250mm)", 2. "mosses+hydrophytes+coarse organic matter" as two classes that are favorable, and 3. "sand and silt <2.5 mm + mud <0.1 mm" as probably rather unfavorable classes. 
 substrate <- select(env, SiteId, SampId, starts_with("sfract_"))
-substrate <- substrate[substrate$SiteId %in% bdm$SiteId, ]
+substrate <- substrate[substrate$SiteId %in% bdms$SiteId, ]
 substrate$SS1 <- substrate$sfract_mobile_blocks + substrate$sfract_coarse_inorganic_sediments
 substrate$SS2 <- substrate$sfract_moss + substrate$sfract_hydrophytes + substrate$sfract_coarse_organic_matter
 substrate$SS3 <- substrate$sfract_sand_silt + substrate$sfract_fine_sediments

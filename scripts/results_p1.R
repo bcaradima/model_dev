@@ -1,3 +1,6 @@
+### RESULTS: Paper 1 ####
+# Description: this script prepares the results for paper 1. It processes the joint model workspaces and combines the results with those of the individual models before producing various plots.
+
 # Calibration results ####
 # Results: paper 1 BDM species
 jsdm.re <- extract.jsdm('outputs/jsdm_p1', 'RE', epsilon=TRUE)

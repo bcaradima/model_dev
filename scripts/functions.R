@@ -1,4 +1,6 @@
 ### FUNCTIONS ####
+# Description: this script defines all custom functions called in the other scripts. The functions are ordered as intuitively as possible to reflect the model development process. For the most part, these are considered to be stable functions.
+
 # Utility functions ####
 # Package installer and loader function: pass a vector of package names
 ipak <- function(pkg){
@@ -979,7 +981,8 @@ extract.resp <- function(results){
   return(beta.taxa.response)
 }
 
-# Extract linear predictor (z) per variable/taxon/sample (z=beta*(x-mean(x)))
+# Given a jSDM result, extract the linear predictor (z) per variable/taxon/sample (z=beta*(x-mean(x))). Uncentered inputs are constructed within the function by calling prepare.inputs().
+# - optimize with lapply() and rbindlist() rather than using loop/rbind
 linear.predictor <- function(results){
   jsdm <- select.jsdm(results)
   

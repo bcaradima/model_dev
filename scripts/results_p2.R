@@ -2,6 +2,7 @@
 # Read and format column names
 bdmf <- read.csv('inputs/BDM.fam_occ_data_2017-07-25.dat', header=T, sep='\t', stringsAsFactors = F)
 
+# Select samples based on sampling window
 bdmf <- bdmf[bdmf$samp.wind=='pref' | bdmf$samp.wind=='buf', ]
 bdmf <- bdmf[!is.na(bdmf$SiteId), ]
 
@@ -15,7 +16,6 @@ colnames(bdmf) <- c("SiteId","SampId", cnames)
 # Set seed and sample
 set.seed(2017)
 sample.bdmf <- bdmf[sample(nrow(bdmf)),]
-n.bdmf <- occur.freq(bdmf)
 
 # Choose number of folds
 k <- 3
@@ -52,6 +52,8 @@ write.csv(sample.bdmf, 'outputs/bdm.family.sample.csv', row.names = F)
 # Read and format column names
 bdms <- read.csv('inputs/BDM_occ_data_2017-07-25.dat', sep='\t', header=TRUE, na.strings=c("<Null>", "NA", ""), stringsAsFactors=FALSE)
 
+bdms <- bdms[bdms$samp.wind=='pref' | bdms$samp.wind=='buf', ]
+
 # Clean BDM dataset column names
 bdms <- select(bdms, SiteId, SampId, contains("Occurrence.group."), contains("Occurrence."))
 ind <- !(colnames(bdms) %in% c("SiteId", "SampId"))
@@ -59,13 +61,13 @@ cnames <- colnames(bdms[, ind])
 cnames <- gsub("Occurrence.", "", cnames)
 cnames <- gsub("group.", "", cnames)
 colnames(bdms) <- c("SiteId","SampId", cnames)
-
-# Get occurrence frequency
-n.bdms <- occur.freq(bdms)
 rm(ind, cnames)
 
 # Drop NA SiteIds
 bdms <- bdms[!is.na(bdms$SiteId), ]
+
+# Drop two genera because the family occurs as well
+bdms <- select(bdms, -Silo, -Stactobia)
 
 # Set seed and sample (i.e., shuffle the data)
 set.seed(2017)
@@ -101,6 +103,7 @@ write.csv(train3, 'outputs/bdm.species.train3.csv', row.names = F)
 write.csv(test3, 'outputs/bdm.species.test3.csv', row.names = F)
 
 write.csv(sample.bdms, 'outputs/bdm.species.sample.csv', row.names = F)
+
 # SAMPLE CFCH ####
 invf <- read.csv('inputs/ALL_occ_data_2017-07-25.dat', header = TRUE, sep = '\t', stringsAsFactors=FALSE)
 invf <- invf[invf$samp.wind=='pref' | invf$samp.wind=='buf', ]
@@ -220,7 +223,7 @@ deploy.jsdm(K, sample.invfp, "invfp_train3", center=T, cv=3)
 n.bdmf <- occur.freq(sample.bdmf)
 n.bdms <- occur.freq(sample.bdms)
 n.invf <- occur.freq(sample.invf)
-n.invfp <- occur.freq(sample.invf.plat)
+n.invfp <- occur.freq(sample.invfp)
 
 # get.taxonomy(sample) ####
 taxonomy.bdmf <- get.taxonomy(sample.bdmf)
@@ -648,7 +651,7 @@ g <- g + facet_grid(. ~ Variable)
 g <- g + coord_cartesian(ylim=c(0,19)) # 
 g <- g + theme_bw(base_size = 24)
 g <- g + theme(axis.title.x=element_blank(),
-                axis.text.x=element_text(angle=45,hjust=1)
+                axis.text.x=element_text(angle=45, hjust=1)
                 # axis.ticks.x=element_blank()
                )
 g <- g + scale_fill_brewer(palette = "Set1")
@@ -682,7 +685,7 @@ g <- g + labs(title = "Distribution of influence factors by trial",
               y = "")
 print(g)
 
-# Cluster K ####
+# Spatial clusters of impacts ####
 dt <- slopes.bdms %>%
   group_by(SampId, Variable) %>%
   summarise(z.range.comm = max(z)-min(z)) %>%

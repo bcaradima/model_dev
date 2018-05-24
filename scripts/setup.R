@@ -1,12 +1,11 @@
-# Description: script loads packages, calls functions script, imports data, does pre-processing, 
-# and calculates influence factors based on imported data. Additional analyses done on the invertebrate data as well
+### SETUP ####
+# Description: this script loads and installs packages, sources the functions script, and reads input data. This script is not meant to modify or pre-process the input data in any way; this is done by the inputs.R script
 
 # Setup: requires project in root folder with:
 # all input data in /inputs directory, 
 # all scripts (e.g., functions.R) in /scripts directory, 
 # and /outputs directory for optional plots/tables
 
-### SETUP ####
 source('scripts/functions.R')
 
 # Install and load packages
