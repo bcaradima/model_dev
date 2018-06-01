@@ -3,16 +3,16 @@
 
 # Calibration results ####
 # Results: paper 1 BDM species
-jsdm.re <- extract.jsdm('outputs/jsdm_p1', 'RE', epsilon=TRUE)
-jsdm <- extract.jsdm('outputs/jsdm_p1', 'noRE', epsilon=FALSE)
+jsdm.re <- extract.jsdm('outputs/jsdm_p1', 'bdms_RE', epsilon=TRUE)
+jsdm <- extract.jsdm('outputs/jsdm_p1', 'bdms', epsilon=FALSE)
 
 ### > Combine i/jSDM results ####
 # Warning: manually check columns being dropped!
 probability <- bind_rows(isdm.prob, jsdm$probability[, colnames(isdm.prob), with=FALSE])
-deviance <- bind_rows(isdm.dev, select(jsdm$deviance, -Trial))
+dev <- bind_rows(isdm.dev, jsdm$deviance[, colnames(isdm$deviance), with=FALSE])
 
 # > i/jSDM cross-validation ####
-jsdm.cv <- cv.jsdm('noRE')
+jsdm.cv <- cv.jsdm('bdms')
 # Combine CV deviance ####
 # Warning: manually check columns being dropped
 deviance.cv <- bind_rows(isdm.cv.dev, select(jsdm.cv$deviance, -Trial))
@@ -44,80 +44,80 @@ dev.off()
 
 
 
-# Plot P1 - deviance vs occurrence ####
-deviance$rel.freq <- deviance$n/deviance$n.samples
+# Plot P1 - deviance statistics ####
+dev$rel.freq <- dev$n/dev$n.samples
 
-test1 <- spread(select(deviance, Taxon, Model, std.res.dev), Model, std.res.dev) # y coordinates
+test1 <- spread(select(dev, Taxon, Model, std.res.dev), Model, std.res.dev) # y coordinates
 colnames(test1) <- c("Taxon", "iSDM.dev", "jSDM.dev")
-
-test2 <- spread(select(deviance, Taxon, Model, rel.freq), Model, rel.freq) # x coordinates
+test2 <- spread(select(dev, Taxon, Model, rel.freq), Model, rel.freq) # x coordinates
 colnames(test2) <- c("Taxon", "iSDM.rf", "jSDM.rf")
 
-deviance.segments.fig2 <- left_join(test1, test2, by = "Taxon")
+dev.segments.fig2 <- left_join(test1, test2, by = "Taxon")
 
-null.dev <- deviance[Model == "iSDM", ]
+null.dev <- dev[Model == "iSDM", ]
 null.dev$Model <- "Null model"
 
 n <- 581
 m <- 1:(n-1)
-par(cex=2.25)
-plot(m/n*100,-2*(m/n*log(m/n)+(n-m)/n*log(1-m/n)), 
-     type="l", lwd=2,
-     xlab="Occurrence frequency (%)",
-     ylab="Null model deviance")
+# par(cex=2.25)
+# plot(m/n*100,-2*(m/n*log(m/n)+(n-m)/n*log(1-m/n)), 
+#      type="l", lwd=2,
+#      xlab="Occurrence frequency (%)",
+#      ylab="Null model deviance")
 
 null.dev.line <- data.table(null.dev = -2*(m/n*log(m/n)+(n-m)/n*log(1-m/n)), n.samples = m)
 null.dev.line$rel.freq <- m/n
 null.dev.line$Model <- "Null model"
 
-pdf('P1 - deviance vs occurrence.pdf', paper='special', width = 9, height = 6)
-g <- ggplot(data=deviance)
-g <- g + geom_point(data = null.dev, aes(x=rel.freq, y=null.dev/n.samples, color=Model), size = 3, alpha=0.4)
-g <- g + geom_line(data = null.dev.line, aes(x=rel.freq, y=null.dev, color=Model), alpha=0.4, show.legend = FALSE)
-g <- g + geom_point(aes(x=rel.freq, y=std.res.dev, color = Model), size=3, alpha=0.4)
-g <- g + geom_segment(data = deviance.segments.fig2, aes(x = iSDM.rf, y = iSDM.dev, xend = jSDM.rf, yend= jSDM.dev), alpha = 0.3)
+# pdf('P1 - deviance vs occurrence.pdf', paper='special', width = 9, height = 6)
+g1 <- ggplot(data=dev)
+g1 <- g1 + geom_point(data = null.dev, aes(x=rel.freq, y=null.dev/n.samples, color=Model), size = 3, alpha=0.4)
+g1 <- g1 + geom_line(data = null.dev.line, aes(x=rel.freq, y=null.dev, color=Model), linetype = "dashed", alpha=0.4, show.legend = FALSE)
+g1 <- g1 + geom_point(aes(x=rel.freq, y=std.res.dev, color = Model), size=3, alpha=0.4)
+g1 <- g1 + geom_segment(data = dev.segments.fig2, aes(x = iSDM.rf, y = iSDM.dev, xend = jSDM.rf, yend= jSDM.dev), alpha = 0.3)
 
-g <- g + scale_colour_manual(values=c("jSDM" = "#048504", "iSDM" = "#790FBF", "Null model" = "#000000"))
-g <- g + theme_bw(base_size = 18)
-g <- g + theme(axis.text=element_text(size=18))
-g <- g + theme(plot.title = element_blank())
-g <- g + labs(title = "Model deviance vs relative occurrence frequency",
-              y = "Standardized deviance",
+g1 <- g1 + scale_colour_manual(values=c("jSDM" = "#048504", "iSDM" = "#790FBF", "Null model" = "#000000"))
+g1 <- g1 + theme_bw(base_size = 15)
+g1 <- g1 + theme(axis.text=element_text(size=14),
+                 plot.title = element_blank())
+g1 <- g1 + labs(y = "Standardized deviance",
               x = "Relative occurrence frequency")
-g <- g + guides(colour = guide_legend(override.aes = list(size=6)), shape = FALSE, color = FALSE)
-print(g)
-dev.off()
-rm(test1, test2, deviance.segments.fig2, null.dev, null.dev.line, n, m)
+g1 <- g1 + guides(colour = guide_legend(override.aes = list(size=6)), shape = FALSE, color = FALSE)
+# print(g1)
+# dev.off()
+rm(test1, test2, dev.segments.fig2, null.dev, null.dev.line, n, m)
 
-# Plot P1 - D2 vs std dev ####
+# Plot P1 - D2 vs std dev ###
 # Point segments
-test1 <- spread(select(deviance, Taxon, Model, D2), Model, D2) # y coordinates
+test1 <- spread(select(dev, Taxon, Model, D2), Model, D2) # y coordinates
 colnames(test1) <- c("Taxon", "iSDM.D2", "jSDM.D2")
-test2 <- spread(select(deviance, Taxon, Model, std.res.dev), Model, std.res.dev) # x coordinates
+test2 <- spread(select(dev, Taxon, Model, std.res.dev), Model, std.res.dev) # x coordinates
 colnames(test2) <- c("Taxon", "iSDM.resdev", "jSDM.resdev")
-deviance.segments <- left_join(test1, test2, by = "Taxon")
+dev.segments <- left_join(test1, test2, by = "Taxon")
 
-pdf('P1 - D2 vs std dev.pdf', paper='special', width = 13, height = 9)
-g <- ggplot(data = deviance)
-g <- g + geom_segment(data = deviance.segments, aes(x = iSDM.resdev, y = iSDM.D2, xend = jSDM.resdev, yend= jSDM.D2), alpha = 0.2)
-g <- g + geom_point(data = deviance, aes(x = std.res.dev, y = D2, color = Model, size = n), alpha = 0.4)
-g <- g + scale_colour_manual(values=c("jSDM" = "#048504", "iSDM" = "#790FBF"))
-g <- g + theme_bw(base_size = 18)
-g <- g + theme(axis.text=element_text(size=18))
-g <- g + theme(plot.title = element_blank())
+# pdf('P1 - D2 vs std dev.pdf', paper='special', width = 13, height = 9)
+g2 <- ggplot(data = dev)
+g2 <- g2 + geom_segment(data = dev.segments, aes(x = iSDM.resdev, y = iSDM.D2, xend = jSDM.resdev, yend= jSDM.D2), alpha = 0.2)
+g2 <- g2 + geom_point(data = dev, aes(x = std.res.dev, y = D2, color = Model, size = n), alpha = 0.4)
+g2 <- g2 + scale_colour_manual(values=c("jSDM" = "#048504", "iSDM" = "#790FBF"))
+g2 <- g2 + theme_bw(base_size = 15)
+g2 <- g2 + theme(axis.text=element_text(size=14),
+                 plot.title = element_blank())
 
-g <- g + labs(title = "",
-              x = expression(paste("Standardized d"["j"]^"proposed")),
+g2 <- g2 + labs(x = "Standardized deviance",
               y = expression("D"["j"]^2),
               colour = "Model", 
               size = "Occurrence\nfrequency")
-g <- g + guides(colour = guide_legend(override.aes = list(size=6)))
-print(g)
-dev.off()
-rm(test1, test2, deviance.segments)
+g2 <- g2 + guides(colour = guide_legend(override.aes = list(size=6)))
+# print(g2)
+# dev.off()
+rm(test1, test2, dev.segments)
+
+# Combine ggplot objects with a common legend (ggpubr function)
+ggarrange(g1, g2, ncol=2, common.legend = FALSE, legend="bottom", align="hv")
 
 # Plot P1 - cross-validation ####
-# Use dplyr verbs to shape plotting data for ggplot
+# pre-process plotting data for ggplot
 cv.plot <- deviance.cv %>%
   select(Taxon, Type, Model, std.deviance) %>%
   group_by(Taxon, Type, Model) %>%
@@ -126,19 +126,29 @@ cv.plot <- deviance.cv %>%
   ungroup() %>% # remove grouping information
   mutate(n = n.bdms[Taxon]) # add occurrence frequency again
 
+# ymax <- max(cv.plot$Testing[!is.infinite(cv.plot$Testing)])
+ymax <- max(cv.plot$Training)
 
-# Format infinite predictive deviance taxa for plotting
-cv.plot$Shape <- ifelse(is.infinite(cv.plot$Testing), 24, 16)
-# cv.plot$n <- ifelse(is.infinite(cv.plot$Testing), NA, cv.plot$n)
+# cv.plot$Infinite <- is.infinite(cv.plot$Testing)
+cv.plot$ymax <- ifelse(cv.plot$Testing > ymax, TRUE, FALSE)
+
+cv.plot$Shape <- ifelse(cv.plot$ymax, 24, 16)
+cv.plot$Testing <- ifelse(cv.plot$ymax, max(cv.plot$Training), cv.plot$Testing)
+# # Set infinite deviances values to the plot edge
+# cv.plot$Testing <- ifelse(is.infinite(cv.plot$Testing), max(cv.plot$Testing[!is.infinite(cv.plot$Testing)]), cv.plot$Testing)
+# 
+# # Format shape based on is.infinite deviance
+# cv.plot$Shape <- ifelse(is.infinite(cv.plot$Testing), 24, 16)
+# 
+# cv.plot$n <- ifelse(cv.plot$Infinite, NA, cv.plot$n)
 cv.plot$Shape <- as.factor(cv.plot$Shape)
-cv.plot$Testing <- ifelse(is.infinite(cv.plot$Testing), max(cv.plot$Testing[!is.infinite(cv.plot$Testing)]), cv.plot$Testing)
+cv.plot <- filter(cv.plot, !(Taxon %in% c("Silo", "Stactobia")))
 
 # Plot data
 g <- ggplot(cv.plot, aes(x = Training, y = Testing, colour = Model, size = n, shape = Shape))
 g <- g + geom_point(alpha = 0.3)
 g <- g + geom_abline(intercept = 0, slope = 1, color="black", size=1.25, alpha = 0.4)
 g <- g + theme(strip.background=element_rect(fill="black"), strip.text=element_text(color="white", face="bold"), axis.text=element_text(size=18))
-
 g <- g + theme_bw(base_size = 18)
 g <- g + guides(colour = guide_legend(override.aes = list(size=6)), shape = guide_legend(override.aes = list(size=6)))
 g <- g + labs(x = "Mean standardized deviance for calibration",
@@ -151,17 +161,18 @@ g <- g + scale_size_continuous(range = c(2, 8))
 g <- g + scale_shape_discrete(name  = "Deviance",
                               breaks=c("16", "24"),
                               labels=c("In range", "Out of range"))
-
-pdf('P1 - cross-validation.pdf', height=8, width=10.5)
+g <- g + coord_cartesian(ylim=c(0, ymax))
 print(g)
-dev.off()
+# pdf('P1 - cross-validation.pdf', height=8, width=10.5)
+# print(g)
+# dev.off()
 
 # Plot P1 - slopes jSDM ####
 slopes <- linear.predictor(jsdm)
 
 # Match expressions to influence factors
 slopes.plot <- slopes
-v <- jsdm$noRE$inf.fact[jsdm$noRE$inf.fact != "Temp2"]
+v <- jsdm$bdms$inf.fact[jsdm$bdms$inf.fact != "Temp2"]
 slopes.plot$Label <- factor(slopes.plot$Variable, levels = v)
 levels(slopes.plot$Label) <- labeller(levels(slopes.plot$Label))
 
@@ -191,95 +202,62 @@ plot.comm(jsdm, 'P1 - parameters jSDM [all taxa]')
 
 # Plot P1 - significant responses ####
 bdms.stan <- select.jsdm(jsdm) # retrieve Stan.fit object
+inf.fact <- bdms.stan$inf.fact
 beta.samples <- bdms.stan[["beta_taxa"]]
-dimnames(beta.samples) <- list(1:dim(beta.samples)[1], jsdm$noRE$inf.fact, colnames(bdms.stan$occur.taxa)) # name the dimensions
+dimnames(beta.samples) <- list(1:dim(beta.samples)[1], inf.fact, colnames(bdms.stan$occur.taxa)) # name the dimensions
 taxon.samples <- melt(beta.samples)
 colnames(taxon.samples) <- c("Sample", "Variable", "Taxon", "Value")
 taxon.samples <- setDT(taxon.samples)
 taxon.samples$Variable <- as.character(taxon.samples$Variable)
 taxon.samples$Taxon <- as.character(taxon.samples$Taxon)
 
-beta.taxa.response <- matrix(nrow=length(n.bdms), ncol=length(inf.fact))
-
-for (k in 1:length(inf.fact)){
-  variable <- inf.fact[k]
-  samples <- taxon.samples[Variable == variable,]
-  
-  for (j in 1:length(names(n.bdms))){
-    taxon <- names(n.bdms)[j]
-    sample <- samples[Taxon==taxon,]
-    sample <- sample$Value
-    
-    # Fill matrix: beta.taxa.response
-    jsig <- quantile(sample, probs = c(0.05, 0.95))
-    
-    # If 5th quantile greater than 0, set positive
-    # If 95th quantile less than 0, set negative
-    if (jsig[1] > 0){ # significant positive
-      response <- "blue"
-    }
-    if (jsig[2] < 0){ # significant negative
-      response <- "red"
-    }
-    # If posterior is !(positive) AND !(negative), set grey
-    if (!(jsig[1] > 0) & !(jsig[2] < 0)){
-      response <- "grey55"
-    }
-    beta.taxa.response[j, k] <- response
-  }
-}
-
+response.bdms <- extract.resp(jsdm)
 # Based on quality-of-fit and predictive performance, find taxa of interest that:
-test <- cv.plot %>%
+temp <- cv.plot %>%
   filter(Model=="jSDM") %>%
   select(Taxon, Training, Testing)
 
 # Combine goodness-of-fit and predictive performance
-taxa.int <- deviance %>%
+taxa.int <- dev %>%
   filter(Model=='jSDM', D2 > 0.25 & D2 < 0.60, std.res.dev > 0.15 & std.res.dev < 0.90) %>%
   select(Taxon, D2) %>%
-  left_join(test, by = "Taxon") %>%
+  left_join(temp, by = "Taxon") %>%
   mutate(n=n.bdms[Taxon], TrTe = Training/Testing)
-rm(test)
+rm(temp)
 
 # Select taxa for heatmap
-d.select <- spread(select(deviance, Taxon, Model, D2), Model, D2)
+d.select <- spread(select(dev, Taxon, Model, D2), Model, D2)
 colnames(d.select) <- c("Taxon", "iSDM.D2", "jSDM.D2")
 
-std.dev.select <- spread(select(deviance, Taxon, Model, std.res.dev), Model, std.res.dev)
+std.dev.select <- spread(select(dev, Taxon, Model, std.res.dev), Model, std.res.dev)
 colnames(std.dev.select) <- c("Taxon", "iSDM.dev", "jSDM.dev")
 
 dt <- left_join(d.select, std.dev.select, by = "Taxon")
 setDT(dt)
 rm(d.select, std.dev.select)
 
-# joint model will always have higher residual deviance; what % higher?
-dt$rdev.diff <- (dt$iSDM.dev/dt$jSDM.dev)*100
-
-# joint model will always have lower D2; what % 
-dt$d.diff <- (dt$iSDM.D2/dt$jSDM.D2)*100
+# # joint model will always have higher residual deviance; what % higher?
+# dt$rdev.diff <- (dt$iSDM.dev/dt$jSDM.dev)*100
+# 
+# # joint model will always have lower D2; what % 
+# dt$d.diff <- (dt$iSDM.D2/dt$jSDM.D2)*100
 
 # selection criteria;
 # good fit in joint model,
 # iSDM deviance >95% of jSDM deviance,
 # iSDM D2 not more than 10% of jSDM D2
-nrow(filter(dt, jSDM.D2 > 0.30 & rdev.diff > 0.95 & d.diff < 110))
+# nrow(filter(dt, jSDM.D2 > 0.30 & rdev.diff > 0.95 & d.diff < 110))
 
 # Format density plot output for heatmap
-beta.taxa.response <- as.data.table(beta.taxa.response)
-beta.taxa.response$Taxon <- names(n.bdms)
-beta.taxa.response$n <- n.bdms[beta.taxa.response$Taxon]
-colnames(beta.taxa.response) <- c(inf.fact, "Taxon", "n")
-beta.taxa.response <- arrange(beta.taxa.response, desc(n))
 
-setDT(beta.taxa.response)
-beta.taxa.response[beta.taxa.response=="red"] <- -1
-beta.taxa.response[beta.taxa.response=="blue"] <- 1
-beta.taxa.response[beta.taxa.response=="grey55"] <- 0
+response.bdms$n <- n.bdms[response.bdms$Taxon]
+colnames(response.bdms) <- c(jsdm$bdms$inf.fact, "Taxon", "n")
+response.bdms <- arrange(response.bdms, desc(n))
+
 
 # Color coding for all taxa
 # Subset the taxa with good model performance
-btr.int <- filter(beta.taxa.response, Taxon %in% taxa.int$Taxon)
+btr.int <- filter(response.bdms, Taxon %in% taxa.int$Taxon)
 btr.int <- btr.int[, c("Taxon", "n", inf.fact)]
 btr.plot <- btr.int[btr.int$n > 56, c(inf.fact)]
 btr.plot <- apply(btr.plot, 2, as.numeric)
@@ -293,11 +271,11 @@ rect.hclust(pfit, k=4)
 
 library(pheatmap)
 # Save manually
-pheatmap(btr.plot, col=c("tomato3", "snow3", "royalblue4"), cellwidth=30, cellheight=11, cluster_rows=T, cutree_rows=5, cluster_cols=F, clustering_distance_rows = "euclidean", legend=F, show_rownames=TRUE, fontsize=13, fontsize_col=15)
+pheatmap(btr.plot, col=c("tomato3", "snow3", "royalblue4"), cellwidth=30, cellheight=11, cluster_rows=T, cutree_rows=5, cluster_cols=F, clustering_distance_rows = "euclidean", legend=F, show_rownames=TRUE, fontsize=13, fontsize_col=15, labels_col = labeller.names(inf.fact))
 
 
 # Plot P1 - significant responses [all taxa] ####
-btr.all <- beta.taxa.response
+btr.all <- response.bdms
 btr.all <- as.data.table(btr.all)
 btr.all <- arrange(btr.all, desc(n))
 btr.all$Label <- factor(paste(sub("_", " ", btr.all$Taxon), " - ", btr.all$n), levels=paste(sub("_", " ", btr.all$Taxon), " - ", btr.all$n))
@@ -313,10 +291,19 @@ dev.off()
 
 
 # Plot P1 - parameters jSDM [example taxa] ####
+# Modified plot.comm() code for specific taxa.
 pdf('jSDM parameter distributions [example taxa].pdf', onefile = TRUE)
 par(cex=1.25)
-for (k in 1:length(jsdm$noRE$inf.fact)){
-  variable <- jsdm$noRE$inf.fact[k]
+for (k in 1:length(inf.fact)){
+  variable <- inf.fact[k]
+  responses <- response.bdms[response.bdms$Taxon %in% t, ]
+  
+  response <- responses[[variable]]
+  names(response) <- responses$Taxon
+  
+  response[response==0] <- "grey55"
+  response[response==1] <- "blue"
+  response[response==-1] <- "red"
   cat("Plotting: ",variable,"\n")
   # Test temperature as starting variable
   samples <- taxon.samples[Variable == variable,]
@@ -358,12 +345,13 @@ for (k in 1:length(jsdm$noRE$inf.fact)){
   # Plot the taxon-specific parameters
   t <- c("Gammaridae", "Nemoura_minima", "Protonemura_lateralis")
   l <- c("G", "N", "P")
+  
   for (j in 1:length(t)){
     taxon <- t[j]
     sample <- samples[Taxon==taxon,]
     sample <- sample$Value
     
-    lines(density(sample), type="l", col=alpha(c, 1), lwd=1.25)
+    lines(density(sample), type="l", col=alpha(response[taxon], 1), lwd=1.25)
     text(x=mean(sample), y=max(density(sample)$y)+0.1*max(density(sample)$y), labels = l[j])
   }
   # Plot community parameter distribution
@@ -382,6 +370,32 @@ plot.prob(jsdm, 'P1 - prob vs inputs jSDM')
 map.isdm(isdm, 'P1 - maps iSDM')
 map.jsdm(jsdm, 'P1 - maps jSDM')
 
+# Grid arrange prob.taxon and map.taxon plots
+g1 <- plot.prob.taxon(jsdm, "Gammaridae", legend=FALSE)
+g2 <- map.jsdm.taxon(jsdm, "Gammaridae", legend=FALSE)
+g3 <- map.jsdm.taxon(jsdm, "Nemoura_minima", legend=FALSE)
+g4 <- map.jsdm.taxon(jsdm, "Protonemura_lateralis", legend=FALSE)
+
+library(cowplot)
+plot_grid(g1,g2,g3,g4, labels=c("(a)", "(b)", "(c)", "(d)"), align="hv")
+
+# library(gridExtra)
+# library(grid)
+# library(ggplot2)
+# library(lattice)
+# grid.arrange(g1,g2,g3,g4, nrow=2)
+
+
+# library(gtable)
+# g1 <- ggplotGrob(g1)
+# g2 <- ggplotGrob(g2)
+# g3 <- ggplotGrob(g3)
+# g4 <- ggplotGrob(g4)
+# g <- rbind(g1, g2, g3, g4)
+# g$widths <- unit.pmax(g1$widths, g2$widths, g3$widths, g4$widths)
+# grid.newpage()
+# grid.draw(g)
+
 # Plot P1 - maps influence factors ####
 x <- prepare.inputs(K, sample.bdms, center = FALSE)
 x <- gather(x, Variable, Value, -SiteId, -SampId)
@@ -393,25 +407,19 @@ map.inputs(x, 'P1 - maps influence factors')
 
 # Plot P1 - parameter SD ####
 # Extract the entire posterior beta sample
-beta.samples <- jsdm$noRE$beta_taxa
-bs <- melt(beta.samples, varnames = c("Sample", "Variable", "Taxa"), value.name = "Value", as.is = TRUE)
-colnames(bs) <- c("Sample", "Variable", "Taxon", "Parameter")
-bs$Variable <- as.character(bs$Variable)
-bs$Taxon <- as.character(bs$Taxon)
-bs <- tbl_df(bs)
-rm(beta.samples)
+jsdm.beta.samples <- extract.beta(jsdm)
 
 # Fast aggregation of 10M row dataset
-bssd <- bs %>%
+plot.data <- jsdm.beta.samples %>%
   group_by(Taxon, Variable) %>%
-  summarise(SD = sd(Parameter), Mean = mean(Parameter))
+  summarise(SD = sd(Value), Mean = mean(Value))
 
-bssd$n <- n.bdms[bssd$Taxon]
+plot.data$n <- n.bdms[plot.data$Taxon]
 
-bssd$Label <- factor(bssd$Variable, levels = inf.fact)
-levels(bssd$Label) <- labeller(levels(bssd$Label))
+plot.data$Label <- factor(plot.data$Variable, levels = inf.fact)
+levels(plot.data$Label) <- labeller(levels(plot.data$Label))
 
-g <- ggplot(data=bssd, aes(x = n, y = SD, size = n))
+g <- ggplot(data=plot.data, aes(x = n, y = SD, size = n))
 g <- g + geom_point(alpha = 0.5)
 g <- g + facet_grid(Label ~ ., scales = "free", labeller=label_parsed)
 g <- g + theme_bw(base_size = 14)
@@ -427,8 +435,8 @@ print(g)
 dev.off()
 
 # Plot P1 - parameter uncertainty ####
-bssd$rSD <- bssd$SD/bssd$Mean
-g <- ggplot(data=bssd, aes(x = n, y = rSD, size = n))
+plot.data$rSD <- plot.data$SD/plot.data$Mean
+g <- ggplot(data=plot.data, aes(x = n, y = rSD, size = n))
 g <- g + geom_point(alpha = 0.5)
 g <- g + facet_wrap(~ Variable, labeller=label_parsed)
 g <- g + theme_bw(base_size = 13)
@@ -440,7 +448,7 @@ g <- g + labs(title = expression(paste(sigma,"/",mu)),
 print(g)
 
 
-bssd.cv <- bssd %>%
+bssd.cv <- plot.data %>%
   mutate(rSD = SD/abs(Mean))
 bssd.cv$Label <- factor(bssd.cv$Variable, levels = c("Temp", "Temp2", "FV", "F10m", "IAR", "Urban", "LUD"))
 
@@ -461,9 +469,9 @@ dev.off()
 
 # Table P1 - Count significant responses ####
 # Count significant parameters
-p1.uncertainty <- bs %>%
+p1.uncertainty <- jsdm.beta.samples %>%
   group_by(Variable, Taxon) %>%
-  do(data.frame(t(quantile(.$Parameter, probs = c(0.05, 0.95))))) %>%
+  do(data.frame(t(quantile(.$Value, probs = c(0.05, 0.95))))) %>%
   rename(quant5 = X5., quant95 = X95.) %>%
   setDT()
 
@@ -491,8 +499,9 @@ epsilon <- data.table(SiteId = names(jsdm.re$eps.maxpost), epsilon.maxpost = jsd
 epsilon <- left_join(epsilon, inputs$xy, by="SiteId")
 epsilon$color = ifelse(epsilon$epsilon.maxpost > 0, "Positive", "Negative")
 
-g <- ggplot(inputs$ch, aes(POINT_X, POINT_Y))
-g <- g + geom_path(lineend = "round")
+ch <- fortify(inputs$ch)
+g <- ggplot()
+g <- g + geom_polygon(data = ch, aes(x = long, y = lat, group = group), fill=NA, color="black")
 g <- g + geom_point(data = epsilon, aes(X, Y, size = abs(epsilon.maxpost), color = color), alpha = 0.35)
 g <- g + labs(title = "",
               subtitle = "",
@@ -524,16 +533,17 @@ pairs.panels(epsilon.plot, density = TRUE, scale=FALSE, hist.col="grey", cex.cor
 
 
 # Plot P1 - parameter dotplot [4 pages] ####
+# Warning: really bad code ahead...
 # Extract the entire posterior beta sample
-beta.samples <- jsdm$noRE$beta_taxa
-# Subset the parameter sample based on lower and upper percentiles
-beta.samples <- apply(beta.samples, c(2,3), function(x){
-  lower <- quantile(x, probs = 0.10)
-  upper <- quantile(x, probs = 0.90)
-  x <- c(lower, upper)
-})
+jsdm.beta.samples <- extract.beta(jsdm)
 
-isdm.beta <- isdm.bdms$parameters
+jsdm.beta.samples.quantiles <- jsdm.beta.samples %>%
+  group_by(Variable, Taxon) %>%
+  summarise(quantile10=quantile(Value, 0.10), quantile90=quantile(Value, 0.90)) %>%
+  setDT()
+colnames(jsdm.beta.samples.quantiles)<- c("Variable", "Taxon", "quantile10", "quantile90")
+
+isdm.beta <- isdm$parameters
 if ("Model" %in% colnames(isdm.beta)){
   isdm.beta$Model <- NULL
 }
@@ -542,75 +552,62 @@ isdm.beta$Variable <- as.character(isdm.beta$Variable)
 
 # Number of pages per taxa (ntpp)
 pages <- 4
-ntpp <- length(n)/pages
-tpp <- split(n, ceiling(seq_along(n)/ntpp)) # bin the number of taxa per page
-pdf(paste(output_dir, "/", trials[t], "_dotplot_notnorm.pdf",sep=""), paper = "special", height = h, width = w, onefile = TRUE)
+ntpp <- length(n.bdms)/pages
+tpp <- split(n.bdms, ceiling(seq_along(n.bdms)/ntpp)) # bin the number of taxa per page
+pdf(paste("outputs/jsdm_p1/parameter_dotplot_notnorm.pdf",sep=""), paper = "special", height = 10, width = 9, onefile = TRUE)
 for (page in 1:pages){
-  # Tidy the jSDM beta quantiles
-  # Melt 3D array to 2D array
-  bs <- melt(beta.samples, varnames = c("Sample", "Variable", "Taxon"), value.name = "Value", as.is = TRUE)
-  bs <- tbl_df(spread(bs, Sample, Value))
-  colnames(bs)<- c("Variable", "Taxon", "quantile10", "quantile90")
   
-  bs <- bs[bs$Taxon %in% names(tpp[page][[1]]), ]
+  plot.data <- jsdm.beta.samples.quantiles[jsdm.beta.samples.quantiles$Taxon %in% names(tpp[page][[1]]), ]
   
   # Prepare the jSDM parameter values
-  beta.max <- data.table(t(beta.taxa.maxpost), stringsAsFactors = F)
-  colnames(beta.max) <- inf.fact
-  beta.max$Taxon <- colnames(occur.taxa)
-  beta.max <- gather(beta.max, Variable, Value, -Taxon)
+  beta.max <- select(jsdm$parameters, Taxon, Variable, Parameter)
   colnames(beta.max) <- c("Taxon", "Variable", "jSDM.parameter")
   beta.max$Variable <- as.character(beta.max$Variable)
   
   # Join the quantiles, jSDM, and iSDM parameters together
-  bs <- left_join(bs, beta.max, by = c("Taxon", "Variable"))
-  bs <- left_join(bs, isdm.beta, by = c("Taxon", "Variable"))
+  plot.data <- left_join(plot.data, beta.max, by = c("Taxon", "Variable"))
+  plot.data <- left_join(plot.data, isdm.beta, by = c("Taxon", "Variable"))
   
   # Model (variable) and Parameter (value) gather the two columns, jSDM.parameter and iSDM.parameter
   # into a variable/value pair
-  bs <- gather(bs, Model, Parameter, jSDM.parameter:iSDM.parameter)
+  plot.data <- gather(plot.data, Model, Parameter, jSDM.parameter:iSDM.parameter)
   
   # Process iSDM outliers
   # Get min and max posterior parameter values within the 10th-90th quantiles
-  lim.min <- aggregate(quantile10 ~ Variable, bs, min)
+  lim.min <- aggregate(quantile10 ~ Variable, plot.data, min)
   vmin <- lim.min$quantile10; names(vmin) <- lim.min$Variable
   
-  lim.max <- aggregate(quantile90 ~ Variable, bs, max)
+  lim.max <- aggregate(quantile90 ~ Variable, plot.data, max)
   vmax <- lim.max$quantile90; names(vmax) <- lim.max$Variable
   
   # Set colors for each parameter
   # g <- g + scale_colour_manual(values=c("jSDM" = "#048504", "iSDM" = "#790FBF"))
-  bs$Col <- "#048504"
-  bs$Col[bs$Model == 'iSDM.parameter'] <- "#790FBF"
-  bs$Col <- ifelse(bs$Parameter < vmin[bs$Variable], "#6B6B6B", bs$Col)
-  bs$Parameter <- ifelse(bs$Parameter < vmin[bs$Variable], vmin[bs$Variable], bs$Parameter)
+  plot.data$Col <- "#048504"
+  plot.data$Col[plot.data$Model == 'iSDM.parameter'] <- "#790FBF"
+  plot.data$Col <- ifelse(plot.data$Parameter < vmin[plot.data$Variable], "#6B6B6B", plot.data$Col)
+  plot.data$Parameter <- ifelse(plot.data$Parameter < vmin[plot.data$Variable], vmin[plot.data$Variable], plot.data$Parameter)
   
-  bs$Col <- ifelse(bs$Parameter > vmax[bs$Variable], "#6B6B6B", bs$Col)
-  bs$Parameter <- ifelse(bs$Parameter > vmax[bs$Variable], vmin[bs$Variable], bs$Parameter)
+  plot.data$Col <- ifelse(plot.data$Parameter > vmax[plot.data$Variable], "#6B6B6B", plot.data$Col)
+  plot.data$Parameter <- ifelse(plot.data$Parameter > vmax[plot.data$Variable], vmin[plot.data$Variable], plot.data$Parameter)
   rm(lim.min, lim.max, vmin, vmax)
   
   # Order labels by occurrence frequency
-  bs$Labels <- factor(paste(bs$Taxon, ' - ', n[bs$Taxon]), levels = paste(names(sort(n)), ' - ', sort(n)))
+  plot.data$Labels <- factor(paste(plot.data$Taxon, ' - ', n.bdms[plot.data$Taxon]), levels = paste(names(sort(n.bdms)), ' - ', sort(n.bdms)))
   
   # Order variable facets and pass expressions for units in facet labels
-  bs$Variable <- factor(bs$Variable, levels = c(inf.fact))
-  levels(bs$Variable) <- c(expression(paste("Temp (1/", degree, "C)")),
-                           expression(paste("Temp"^2," (1/", degree, "C)")),
-                           expression(paste("FV (s/m)")),
-                           expression(paste("F10m (1/%)")),
-                           expression(paste("IAR")), # units don't fit: (spray treatments * fraction cropland)
-                           expression(paste("Urban (1/%)")),
-                           expression(paste("LUD (CE/km"^2,")")))
+  plot.data$Variable <- factor(plot.data$Variable, levels = c(inf.fact))
+  levels(plot.data$Variable) <- labeller(inf.fact)
+
   # Build the plot
-  g <- ggplot(bs)
+  g <- ggplot(plot.data)
   g <- g + geom_hline(yintercept=0, alpha=0.4)
   g <- g + geom_linerange(aes(x = Labels, ymin = quantile10, ymax = quantile90), color = 'black', alpha = 0.6)
   g <- g + geom_point(aes(x = Labels, y = Parameter, colour = Col), stroke=0, size = 2.5, alpha = 0.5)
   g <- g + facet_grid(. ~ Variable, scales = "free", labeller=label_parsed)
   g <- g + coord_flip()
   g <- g + theme_bw()
-  g <- g + labs(title = "Taxon-specific parameters in the individual and joint models",
-                subtitle = "Maximum likelihood estimates (iSDM) and maximum posterior values with 10th-90th percentile interval (jSDM)",
+  g <- g + labs(title = "Taxon-specific parameter estimates by model",
+                subtitle = "MLEs (iSDM) and maximum posterior (jSDM) with 10th-90th percentile interval",
                 x = "Occurrence frequency and taxon",
                 y = "Value")
   g <- g + theme(axis.text.x=element_text(angle=90, hjust=1, vjust=0.5))
@@ -658,7 +655,7 @@ spf <- aggregate(Species ~ Fold, prob[prob$Type == 'Training', ], unique)
 # taxa <- intersect(spf$Species[[1]], intersect(spf$Species[[2]], spf$Species[[3]]))
 taxa <- sapply(spf$Species, function(x){unique(x)})
 taxa <- unique(unlist(taxa))
-taxa <- n[taxa]
+taxa <- n.bdms[taxa]
 taxa <- sort(taxa, decreasing = T)
 taxa <- names(taxa)
 rm(spf)
@@ -672,7 +669,7 @@ for (i in 1:length(taxa)){
   g <- g + facet_grid(. ~ Trial + Type, scales = "free")
   
   g <- g + theme_bw(base_size = 14)
-  g <- g + ggtitle(paste("Page ", page, " - probability for training/testing of iSDM vs jSDM for ", paste(tname), ' (n = ', n[tname], ')', sep = ''))
+  g <- g + ggtitle(paste("Page ", page, " - probability for training/testing of iSDM vs jSDM for ", paste(tname), ' (n = ', n.bdms[tname], ')', sep = ''))
   g <- g + scale_fill_brewer(palette = "Set1")
   
   print(g)

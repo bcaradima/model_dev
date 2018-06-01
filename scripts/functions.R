@@ -74,6 +74,23 @@ labeller <- function(inf.fact){
   labels[inf.fact]
 }
 
+labeller.names <- function(inf.fact){
+  labels <- c("A10m" = expression(paste("A10m")),
+              "Temp" = expression(paste("Temp")),
+              "Temp2" = expression(paste("Temp"^2)),
+              "FV" = expression(paste("FV")),
+              
+              "F10m" = expression(paste("F10m")),
+              "FRI" = expression(paste("FRI")),
+              "bFRI" = expression(paste("bFRI")),
+              
+              "IAR" = expression(paste("IAR")),
+              "Urban" = expression(paste("Urban")),
+              "LUD" = expression(paste("LUD"))
+              
+  )
+  labels[inf.fact]
+}
 # Returns expression label for linear model
 labeller.lm <- function(x, y, df){
   f <- as.formula(paste(y, "~", x, sep=""))
@@ -467,7 +484,7 @@ cv.jsdm <- function(trials) {
     trial <- trials[t]
     for (k in 1:3){
       model.image <- new.env()
-      path <- paste('outputs/jsdm_p2/jsdm_', trial, '_train', k, sep="")
+      path <- paste('outputs/jsdm_p1/jsdm_',trial,'_train', k, sep="")
       load(paste(path, "/Inv_JSDM_D1.RData", sep = ""), envir = model.image)
       
       # Extract objects from workspace image to local environment
@@ -1099,7 +1116,6 @@ map.isdm <- function(results, fileName) {
     dt$Obs <- as.factor(dt$Obs)
     
     g <- ggplot()
-    # g <- g + geom_path(lineend = "round")
     g <- g + geom_polygon(data = ch, aes(x = long, y = lat, group = group), fill=NA, color="black")
     g <- g + geom_point(data = dt, aes(X, Y, color = Obs, size = Pred), alpha = 0.35)
     # g <- g + scale_size_continuous(limits = c(0,1), breaks = seq(0, 1, 0.2), range = c(2, 7))
@@ -2192,7 +2208,7 @@ plot.comm <- function(results, filename){
   dev.off()
 }
 
-# Plot probabilities versus influence factors, given extract.jsdm() or run.isdm() output object
+# Plot probabilities versus influence factors for each taxon, given extract.jsdm() or run.isdm() output object
 plot.prob <- function(results, filename){
   # Detect whether "results" argument is a collection of iSDMs or a jSDM,
   # create objects for preparation of inputs 
@@ -2245,6 +2261,55 @@ plot.prob <- function(results, filename){
     print(g)
   }
   dev.off()
+}
+
+# Plot probabilities versus influence factors for specific taxon, given extract.jsdm() or run.isdm() output object
+plot.prob.taxon <- function(results, taxon, legend=TRUE){
+  # Detect whether "results" argument is a collection of iSDMs or a jSDM,
+  # create objects for preparation of inputs 
+  if ("models" %in% names(results)){
+    K <- results$inf.fact
+    y <- data.table(SiteId = results$mdata$SiteId, SampId = results$mdata$SampId)
+  }else{
+    jsdm <- select.jsdm(results)
+    K <- jsdm$inf.fact
+    y <- data.table(SiteId = jsdm$sites, SampId = jsdm$samples)
+  }
+  
+  # Prepare inputs and reshape into tidy data
+  inputs <- prepare.inputs(K, y, center = FALSE)
+  inputs <- gather(inputs, Variable, Value, -SiteId, -SampId)
+  inputs <- filter(inputs, Variable != "Temp2")
+  
+  # labeller() returns expressions for nice plot labels for each influence factor
+  inputs$Label <- factor(inputs$Variable, levels = K[K !="Temp2"])
+  levels(inputs$Label) <- labeller(levels(inputs$Label))
+  
+  # Join inputs to probabilities
+  prob <- left_join(results$probability, inputs, by=c("SiteId", "SampId"))
+  prob$Obs <- as.factor(prob$Obs)
+  setDT(prob)
+  
+  taxon.prob <- prob[Taxon == taxon, ]
+  taxon.label <- sub("_", " ", taxon)
+  
+  g <- ggplot(data = taxon.prob, aes(x = Value, y = Pred, color = Obs))
+  g <- g + geom_point(alpha = 0.25)
+  g <- g + theme_bw(base_size=15)
+  g <- g + facet_wrap(~ Label, scales = "free_x", labeller=label_parsed, strip.position="bottom")
+  g <- g + labs(title = taxon.label,
+    y = "Probability of occurrence",
+    color = "Observation")
+  g <- g + theme(strip.background = element_blank(), 
+                 strip.placement = "outside",
+                 axis.title.x = element_blank(),
+                 plot.title = element_text(hjust = 0.5))
+  g <- g + scale_color_manual(name = "Observation", values=c("#FF0000", "#0077FF"), labels=c("Absence", "Presence"))
+  g <- g + guides(colour = guide_legend(override.aes = list(size=6)))
+  if (!legend){
+    g <- g + guides(colour=FALSE, size=FALSE)
+  }
+  return(g)
 }
 
 

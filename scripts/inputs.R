@@ -1,6 +1,5 @@
-### > PRE-PROCESSING ####
-# Description: this script pre-processes the input data and prepares potential influence factors for the models.
-
+### INPUTS ####
+# Description: this script prepares the observations and input data. Pre-processing and sampling is performed for observations. Potential inputs for the models are also calculated.
 # Taxonomy ####
 inputs$taxonomy <- data.table(inputs$taxonomy)
 
@@ -28,7 +27,211 @@ inv <- select(inv, -Taxon)
 # inv$PA <- ifelse(inv$Abundance > 0, 1, 0)
 # inv$PA[is.na(inv$PA)] <- 1
 
-# Pre-process land use ####
+# SAMPLE BDMf ####
+# Read and format column names
+bdmf <- read.csv('inputs/BDM.fam_occ_data_2017-07-25.dat', header=T, sep='\t', stringsAsFactors = F)
+
+# Select samples based on sampling window
+bdmf <- bdmf[bdmf$samp.wind=='pref' | bdmf$samp.wind=='buf', ]
+bdmf <- bdmf[!is.na(bdmf$SiteId), ]
+
+bdmf <- select(bdmf, SiteId, SampId, contains("Occurrence.group."), contains("Occurrence."))
+ind <- !(colnames(bdmf) %in% c("SiteId", "SampId"))
+cnames <- colnames(bdmf[, ind])
+cnames <- gsub("Occurrence.", "", cnames)
+cnames <- gsub("group.", "", cnames)
+colnames(bdmf) <- c("SiteId","SampId", cnames)
+
+# Set seed and sample
+set.seed(2017)
+sample.bdmf <- bdmf[sample(nrow(bdmf)),]
+
+n.bdmf <- occur.freq(sample.bdmf)
+
+# Choose number of folds
+k <- 3
+# Cut the randomly shuffled data into k-folds
+k.folds <- cut(seq(1, nrow(sample.bdmf)), breaks=k, labels=FALSE)
+
+fold1 <- sample.bdmf[which(k.folds == 1),]
+fold2 <- sample.bdmf[which(k.folds == 2),]
+fold3 <- sample.bdmf[which(k.folds == 3),]
+
+# Combine the folds manually for the joint model
+train1 <- bind_rows(fold1, fold2)
+test1 <- fold3
+
+train2 <- bind_rows(fold2, fold3)
+test2 <- fold1
+
+train3 <- bind_rows(fold1, fold3)
+test3 <- fold2
+
+# Write data to /outputs 
+write.csv(train1, 'outputs/bdm.family.train1.csv', row.names = F)
+write.csv(test1, 'outputs/bdm.family.test1.csv', row.names = F)
+
+write.csv(train2, 'outputs/bdm.family.train2.csv', row.names = F)
+write.csv(test2, 'outputs/bdm.family.test2.csv', row.names = F)
+
+write.csv(train3, 'outputs/bdm.family.train3.csv', row.names = F)
+write.csv(test3, 'outputs/bdm.family.test3.csv', row.names = F)
+
+write.csv(sample.bdmf, 'outputs/bdm.family.sample.csv', row.names = F)
+
+### SAMPLE BDMs ####
+# Read and format column names
+bdms <- read.csv('inputs/BDM_occ_data_2017-07-25.dat', sep='\t', header=TRUE, na.strings=c("<Null>", "NA", ""), stringsAsFactors=FALSE)
+
+bdms <- bdms[bdms$samp.wind=='pref' | bdms$samp.wind=='buf', ]
+
+# Clean BDM dataset column names
+bdms <- select(bdms, SiteId, SampId, contains("Occurrence.group."), contains("Occurrence."))
+ind <- !(colnames(bdms) %in% c("SiteId", "SampId"))
+cnames <- colnames(bdms[, ind])
+cnames <- gsub("Occurrence.", "", cnames)
+cnames <- gsub("group.", "", cnames)
+colnames(bdms) <- c("SiteId","SampId", cnames)
+rm(ind, cnames)
+
+# Drop NA SiteIds
+bdms <- bdms[!is.na(bdms$SiteId), ]
+
+# Drop two genera because the family occurs as well
+bdms <- select(bdms, -Silo, -Stactobia)
+
+# Set seed and sample (i.e., shuffle the data)
+set.seed(2017)
+sample.bdms <- bdms[sample(nrow(bdms)),]
+
+n.bdms <- occur.freq(sample.bdms)
+
+# Choose number of folds
+k <- 3
+# Cut the randomly shuffled data into k-folds
+k.folds <- cut(seq(1, nrow(sample.bdms)), breaks=k, labels=FALSE)
+
+fold1 <- sample.bdms[which(k.folds == 1),]
+fold2 <- sample.bdms[which(k.folds == 2),]
+fold3 <- sample.bdms[which(k.folds == 3),]
+
+# Combine the folds manually for the joint model
+train1 <- bind_rows(fold1, fold2)
+test1 <- fold3
+
+train2 <- bind_rows(fold2, fold3)
+test2 <- fold1
+
+train3 <- bind_rows(fold1, fold3)
+test3 <- fold2
+
+# Write data to /outputs 
+write.csv(train1, 'outputs/bdm.species.train1.csv', row.names = F)
+write.csv(test1, 'outputs/bdm.species.test1.csv', row.names = F)
+
+write.csv(train2, 'outputs/bdm.species.train2.csv', row.names = F)
+write.csv(test2, 'outputs/bdm.species.test2.csv', row.names = F)
+
+write.csv(train3, 'outputs/bdm.species.train3.csv', row.names = F)
+write.csv(test3, 'outputs/bdm.species.test3.csv', row.names = F)
+
+write.csv(sample.bdms, 'outputs/bdm.species.sample.csv', row.names = F)
+
+# SAMPLE CFCH ####
+invf <- read.csv('inputs/ALL_occ_data_2017-07-25.dat', header = TRUE, sep = '\t', stringsAsFactors=FALSE)
+invf <- invf[invf$samp.wind=='pref' | invf$samp.wind=='buf', ]
+invf <- invf[!is.na(invf$SiteId), ]
+
+invf <- select(invf, SiteId, SampId, contains("Occurrence.group."), contains("Occurrence."))
+ind <- !(colnames(invf) %in% c("SiteId", "SampId"))
+cnames <- colnames(invf[, ind])
+cnames <- gsub("Occurrence.", "", cnames)
+cnames <- gsub("group.", "", cnames)
+colnames(invf) <- c("SiteId","SampId", cnames)
+
+# Duplicate sample IDs identified, differ only by Altitude_m value;
+# get the unique rows *without* Altitude_m column
+invf$SampId[duplicated(invf$SampId)]
+invf <- unique(invf)
+
+# Set seed and sample
+set.seed(2017)
+sample.invf <- invf[sample(nrow(invf)),]
+
+# Count occurrences
+n.invf <- occur.freq(sample.invf)
+
+sample.invf <- sample.invf[, c("SiteId", "SampId", names(n.invf[n.invf > 0]))]
+
+# Choose number of folds
+k <- 3
+# Cut the randomly shuffled data into k-folds
+k.folds <- cut(seq(1, nrow(sample.invf)), breaks=k, labels=FALSE)
+
+fold1 <- sample.invf[which(k.folds == 1),]
+fold2 <- sample.invf[which(k.folds == 2),]
+fold3 <- sample.invf[which(k.folds == 3),]
+
+# Combine the folds manually for the joint model
+train1 <- bind_rows(fold1, fold2)
+test1 <- fold3
+
+train2 <- bind_rows(fold2, fold3)
+test2 <- fold1
+
+train3 <- bind_rows(fold1, fold3)
+test3 <- fold2
+
+# Write data to /outputs 
+write.csv(train1, 'outputs/inv.family.train1.csv', row.names = F)
+write.csv(test1, 'outputs/inv.family.test1.csv', row.names = F)
+
+write.csv(train2, 'outputs/inv.family.train2.csv', row.names = F)
+write.csv(test2, 'outputs/inv.family.test2.csv', row.names = F)
+
+write.csv(train3, 'outputs/inv.family.train3.csv', row.names = F)
+write.csv(test3, 'outputs/inv.family.test3.csv', row.names = F)
+
+write.csv(sample.invf, 'outputs/inv.family.sample.csv', row.names = F)
+
+# SAMPLE CFp ####
+# # Subset samples in the plateau?
+sample.invfp <- sample.invf[sample.invf$SiteId %in% env$SiteId[env$BIOGEO=="Mittelland"],]
+n.invfp <- occur.freq(sample.invfp)
+sample.invfp <- sample.invfp[, c("SiteId", "SampId", names(n.invfp[n.invfp > 0]))]
+
+# Choose number of folds
+k <- 3
+# Cut the randomly shuffled data into k-folds
+k.folds <- cut(seq(1, nrow(sample.invfp)), breaks=k, labels=FALSE)
+
+fold1 <- sample.invfp[which(k.folds == 1),]
+fold2 <- sample.invfp[which(k.folds == 2),]
+fold3 <- sample.invfp[which(k.folds == 3),]
+
+# Combine the folds manually for the joint model
+train1 <- bind_rows(fold1, fold2)
+test1 <- fold3
+
+train2 <- bind_rows(fold2, fold3)
+test2 <- fold1
+
+train3 <- bind_rows(fold1, fold3)
+test3 <- fold2
+
+# Write data to /outputs 
+write.csv(train1, 'outputs/inv.family.plateau.train1.csv', row.names = F)
+write.csv(test1, 'outputs/inv.family.plateau.test1.csv', row.names = F)
+
+write.csv(train2, 'outputs/inv.family.plateau.train2.csv', row.names = F)
+write.csv(test2, 'outputs/inv.family.plateau.test2.csv', row.names = F)
+
+write.csv(train3, 'outputs/inv.family.plateau.train3.csv', row.names = F)
+write.csv(test3, 'outputs/inv.family.plateau.test3.csv', row.names = F)
+
+write.csv(sample.invfp, 'outputs/inv.family.plateau.sample.csv', row.names = F)
+
+# Rename land use from DE to EN codes
 codes <- inputs$land_metadata$Code
 codes <- codes[-match("EZG_NR", codes)]
 land.use <- env[, c("SiteId", "SampId", codes)]
@@ -367,3 +570,6 @@ inputs$substrate <- substrate; rm(substrate)
 
 # Random noise ####
 p$Noise <- runif(nrow(p), 0, 1)
+
+# Delete objects ####
+rm(as09.data, as09.metadata, as97.data, asm, b, fold1, fold2, fold3, train1, train2, train3, test1, test2, test3, cnames, ind, k, k.folds)

@@ -13,8 +13,6 @@
 # Global parameters ####
 community <- "community.csv"
 predictors <- "predictors.csv"
-inf.fact <- c("A10m", "IAR", "LUD", "Urban", "bFRI", "FRI", "FV", "WV", "Temp", "Temp2")
-
 random.effects <- FALSE
 
 crossvalid    <- FALSE
@@ -41,6 +39,8 @@ occur.taxa <- read.table(paste("inputs", community, sep="/"), header=TRUE, sep="
 # read environmental conditions:
 env.cond <- read.table(paste("inputs", predictors, sep="/"), header=TRUE, sep=",",
                        stringsAsFactors=FALSE)
+
+inf.fact <- colnames(select(env.cond, -SiteId, -SampId))
 
 # join the environmental conditions to the occurrence data
 env.cond <- left_join(occur.taxa[, c("SiteId", "SampId")], env.cond, by = c("SiteId", "SampId"))
