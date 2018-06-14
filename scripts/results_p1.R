@@ -33,19 +33,22 @@ plot(x=seq(from=-4, to=4, by=0.25), y=link.function(seq(from=-4, to=4, by=0.25))
 axis(side = 1, lwd = 2)
 axis(side = 2, lwd = 2)
 box(lwd=2)
+
 # Plot P1 - BDM occurrence frequency ####
-pdf('P1 - BDM occurrence frequency.pdf', height = 13, width = 15)
+pdf('P1 - BDM prevalence.pdf', height = 10, width = 13)
 par(cex=2.5)
-plot(x = 1:length(n.bdms), y = n.bdms, axes=F, xlab="Taxa (sorted from highest to lowest occurrence frequency)", ylab="Occurrence frequency")
-axis(1, c(0,50,100,150,200,247))
-axis(2, c(0,100,200,300,400,500,581))
+plot(x = 1:length(n.bdms), y = n.bdms, axes=F, 
+     xlab="Taxa (ordered by decreasing prevalence)", 
+     ylab="Prevalence (number of presence data points)")
+axis(1, c(0,50,100,150,200,245))
+axis(2, c(0,100,200,300,400,500,580))
 dev.off()
 
 
 
 
 # Plot P1 - deviance statistics ####
-dev$rel.freq <- dev$n/dev$n.samples
+dev$rel.freq <- (dev$n/dev$n.samples)*100
 
 test1 <- spread(select(dev, Taxon, Model, std.res.dev), Model, std.res.dev) # y coordinates
 colnames(test1) <- c("Taxon", "iSDM.dev", "jSDM.dev")
@@ -66,7 +69,7 @@ m <- 1:(n-1)
 #      ylab="Null model deviance")
 
 null.dev.line <- data.table(null.dev = -2*(m/n*log(m/n)+(n-m)/n*log(1-m/n)), n.samples = m)
-null.dev.line$rel.freq <- m/n
+null.dev.line$rel.freq <- (m/n)*100
 null.dev.line$Model <- "Null model"
 
 # pdf('P1 - deviance vs occurrence.pdf', paper='special', width = 9, height = 6)
@@ -81,7 +84,7 @@ g1 <- g1 + theme_bw(base_size = 15)
 g1 <- g1 + theme(axis.text=element_text(size=14),
                  plot.title = element_blank())
 g1 <- g1 + labs(y = "Standardized deviance",
-              x = "Relative occurrence frequency")
+              x = "Relative prevalence (%)")
 g1 <- g1 + guides(colour = guide_legend(override.aes = list(size=6)), shape = FALSE, color = FALSE)
 # print(g1)
 # dev.off()
@@ -103,13 +106,11 @@ g2 <- g2 + scale_colour_manual(values=c("jSDM" = "#048504", "iSDM" = "#790FBF"))
 g2 <- g2 + theme_bw(base_size = 15)
 g2 <- g2 + theme(axis.text=element_text(size=14),
                  plot.title = element_blank())
-
 g2 <- g2 + labs(x = "Standardized deviance",
               y = expression("D"["j"]^2),
               colour = "Model", 
-              size = "Occurrence\nfrequency")
+              size = "Prevalence")
 g2 <- g2 + guides(colour = guide_legend(override.aes = list(size=6)))
-# print(g2)
 # dev.off()
 rm(test1, test2, dev.segments)
 
@@ -155,7 +156,7 @@ g <- g + labs(x = "Mean standardized deviance for calibration",
               y = "Mean standardized deviance for prediction",
               colour = "Model",
               shape = "Deviance",
-              size = "Occurrence\nfrequency")
+              size = "Prevalence")
 g <- g + scale_colour_manual(values=c("jSDM" = "#048504", "iSDM" = "#790FBF"))
 g <- g + scale_size_continuous(range = c(2, 8))
 g <- g + scale_shape_discrete(name  = "Deviance",
@@ -163,16 +164,30 @@ g <- g + scale_shape_discrete(name  = "Deviance",
                               labels=c("In range", "Out of range"))
 g <- g + coord_cartesian(ylim=c(0, ymax))
 print(g)
+
+g <- ggplot(cv.plot)
+g <- g + geom_point(aes(x=n, y=Testing, color=Model, shape=Shape, size = n))
+g <- g + theme(strip.background=element_rect(fill="black"), strip.text=element_text(color="white", face="bold"), axis.text=element_text(size=18))
+g <- g + theme_bw(base_size = 18)
+g <- g + guides(colour = guide_legend(override.aes = list(size=6)), shape = guide_legend(override.aes = list(size=6)))
+g <- g + scale_colour_manual(values=c("jSDM" = "#048504", "iSDM" = "#790FBF"))
+g <- g + scale_size_continuous(range = c(2, 8))
+g <- g + scale_shape_discrete(name  = "Deviance",
+                              breaks=c("16", "24"),
+                              labels=c("In range", "Out of range"))
+g <- g + coord_cartesian(ylim=c(0, ymax))
+print(g)
+
 # pdf('P1 - cross-validation.pdf', height=8, width=10.5)
 # print(g)
 # dev.off()
 
 # Plot P1 - slopes jSDM ####
-slopes <- linear.predictor(jsdm)
+slopes <- linear.predictor(jsdm.p1)
 
 # Match expressions to influence factors
 slopes.plot <- slopes
-v <- jsdm$bdms$inf.fact[jsdm$bdms$inf.fact != "Temp2"]
+v <- jsdm.p1$bdms$inf.fact[jsdm.p1$bdms$inf.fact != "Temp2"]
 slopes.plot$Label <- factor(slopes.plot$Variable, levels = v)
 levels(slopes.plot$Label) <- labeller(levels(slopes.plot$Label))
 
@@ -182,6 +197,7 @@ x <- gather(x, Variable, Value, -SiteId, -SampId)
 x <- filter(x, Variable != "Temp2")
 x$Label <- factor(x$Variable, levels = v)
 levels(x$Label) <- labeller(levels(x$Label))
+
 g <- ggplot(data=slopes.plot)
 g <- g + geom_line(data = slopes.plot, aes(x = x, y = z, group = Taxon, alpha = alpha))
 g <- g + geom_rug(data = x, aes(x = Value, y = -15), sides="b")
@@ -190,7 +206,7 @@ g <- g + theme_bw(base_size = 18)
 g <- g + theme(axis.title.y = element_text(size = 22), strip.text.x = element_text(size = 17))
 g <- g + theme(plot.title = element_text(hjust = 0.5), plot.subtitle = element_text(hjust = 0.5),
                strip.background = element_blank(), strip.placement = "outside")
-g <- g + labs(x = "", y = expression(paste(Delta, "z")))
+g <- g + labs(x = "", y = expression(paste("z"["ijk"])))
 g <- g + guides(alpha = FALSE)
 
 pdf('P1 - slopes jSDM.pdf', width = 13, height = 9, onefile=TRUE)
@@ -201,7 +217,7 @@ dev.off()
 plot.comm(jsdm, 'P1 - parameters jSDM [all taxa]')
 
 # Plot P1 - significant responses ####
-bdms.stan <- select.jsdm(jsdm) # retrieve Stan.fit object
+bdms.stan <- select.jsdm(jsdm.p1) # retrieve Stan.fit object
 inf.fact <- bdms.stan$inf.fact
 beta.samples <- bdms.stan[["beta_taxa"]]
 dimnames(beta.samples) <- list(1:dim(beta.samples)[1], inf.fact, colnames(bdms.stan$occur.taxa)) # name the dimensions
@@ -251,7 +267,7 @@ rm(d.select, std.dev.select)
 # Format density plot output for heatmap
 
 response.bdms$n <- n.bdms[response.bdms$Taxon]
-colnames(response.bdms) <- c(jsdm$bdms$inf.fact, "Taxon", "n")
+colnames(response.bdms) <- c(jsdm.p1$bdms$inf.fact, "Taxon", "n")
 response.bdms <- arrange(response.bdms, desc(n))
 
 
@@ -426,9 +442,9 @@ g <- g + theme_bw(base_size = 14)
 g <- g + theme(strip.background=element_rect(fill="grey"),strip.text=element_text(color="black", face="bold"),
                plot.title = element_text(hjust = 0.5, size = 12))
 g <- g + labs(title = expression(paste("Standard deviation of posterior taxon-specific parameter distributions ", beta["jk"]^"taxa")),
-              x = "Occurrence frequency",
+              x = "Prevalence",
               y = expression(paste("Standard deviation (", sigma[beta["jk"]^"taxa"],")")),
-              size = "Occurrence\nfrequency")
+              size = "Prevalence")
 g <- g + scale_y_continuous(limits=c(0,NA))
 pdf('P1 - parameter SD.pdf', height = 12.5)
 print(g)

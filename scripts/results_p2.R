@@ -486,6 +486,54 @@ g <- g + labs(title = "Distribution of influence factors by trial",
               y = "")
 print(g)
 
+# Predictive uncertainty ####
+pred <- pred.jsdm("bdms")
+gc()
+
+# what about binding the probabilities manually?
+taxon <- "Baetis_alpinus"
+f1 <- pred$fold1[Taxon=="taxon",]
+f2 <- pred$fold2[Taxon=="taxon",]
+f3 <- pred$fold3[Taxon=="taxon",]
+
+dt <- bind_rows(f1,f2,f3)
+dt <- left_join(dt, sample.bdms[, c("SampId", taxon)], by="SampId")
+colnames(dt) <- c("Taxon", "SampId", "Pred", "Obs")
+
+rm(f1,f2,f3)
+
+# Order samples by decreasing mean predicted probability
+test <- dt %>%
+  group_by(SampId) %>%
+  summarise(mean.Pred = mean(Pred)) %>%
+  arrange(-mean.Pred)
+
+
+plot.data <- na.omit(dt)
+plot.data$SampId <- factor(plot.data$SampId, levels=test$SampId)
+plot.data$Obs <- as.factor(plot.data$Obs)
+rm(test)
+
+g <- ggplot(plot.data)
+g <- g + stat_density_ridges(aes(x = Pred, y = SampId, fill = Obs), size = 10, color=NA, rel_min_height=0.01, scale=10, alpha = 0.5)
+# g <- g + theme_bw(base_size=17)
+g <- g + theme_pubr()
+g <- g + theme(#plot.title=element_blank(),
+  axis.ticks.x = element_blank(),
+  axis.text.x = element_blank(),
+  panel.background = element_rect(color = "white"))
+
+g <- g + guides(colour = guide_legend(override.aes = list(size=6)))
+g <- g + labs(title="Predictions from k-fold cross-validation",
+              x="Posterior probability",
+              y="Sample sites (ordered by mean probability)",
+              fill="Observation")
+g <- g + scale_fill_manual(values= c("1" = "blue", "0" = "red"), labels=c("Presence", "Absence"))
+g <- g + coord_flip()
+pdf('Predictive uncertainty.pdf', width = 10, height = 7)
+g
+dev.off()
+
 # Spatial clusters of impacts ####
 dt <- slopes.bdms %>%
   group_by(SampId, Variable) %>%

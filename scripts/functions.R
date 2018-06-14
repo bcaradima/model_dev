@@ -436,7 +436,7 @@ select.jsdm <- function(jsdm){
 }
 
 
-# Validate models ####
+# Validation ####
 # Note that in testing iSDMs, predictions are made on NA observations
 cv.isdm <- function(results, data, predictors){
   # Create an output data.table
@@ -670,6 +670,145 @@ cv.jsdm <- function(trials) {
     }
   }
   return(output)
+}
+
+pred.jsdm <- function(trials){
+  pred <- list()
+  # pred <- data.table()
+  for (t in 1:length(trials)){
+    trial <- trials[t]
+    for (k in 1:3){
+      model.image <- new.env()
+      path <- paste('outputs/jsdm_p1/jsdm_',trial,'_train', k, sep="")
+      load(paste(path, "/Inv_JSDM_D1.RData", sep = ""), envir = model.image)
+      
+      # Extract objects from workspace image to local environment
+      sites <- model.image$sites
+      samples <- model.image$samples
+      occur.taxa <- model.image$occur.taxa
+      env.cond <- model.image$env.cond
+      inf.fact <- model.image$inf.fact
+  
+      jsdm <- extract(model.image$res.D1,permuted=TRUE,inc_warmup=FALSE)
+      rm(model.image)
+      
+      # Name dimensions of beta^taxa array
+      dimnames(jsdm[["beta_taxa"]])[[1]] <- 1:dim(jsdm[["beta_taxa"]][,,])[1]
+      dimnames(jsdm[["beta_taxa"]])[[2]] <- inf.fact
+      dimnames(jsdm[["beta_taxa"]])[[3]] <- colnames(occur.taxa)
+      
+      # Name dimensions of alpha^taxa array
+      dimnames(jsdm[["alpha_taxa"]])[[1]] <- 1:nrow(jsdm[["alpha_taxa"]])
+      dimnames(jsdm[["alpha_taxa"]])[[2]] <- colnames(occur.taxa)
+      
+      beta.taxa <- jsdm[["beta_taxa"]]
+      alpha.taxa <- jsdm[["alpha_taxa"]]
+      
+      # PREDICTION: Prepare the predictive samples and inputs
+      obs.test <- read.csv(paste(path, '/inputs/test', k, '.csv', sep = ''), header = TRUE, stringsAsFactors = F)
+      predictors <- read.csv(paste(path, "/inputs/predictors.csv", sep = ""), header = TRUE, sep = ',', stringsAsFactors = F)
+      
+      # Drop taxa that do not occur in training data
+      obs.test <- obs.test[, c("SiteId", "SampId", colnames(occur.taxa))]
+      # Join predictors to test observations
+      predictors.test <- left_join(obs.test[, c("SiteId", "SampId")], predictors, by=c("SiteId", "SampId"))
+      
+      # Drop rows in obs.test and predictors.test where the latter has any NAs
+      ind <- !apply(is.na(predictors.test[,inf.fact]),1,FUN=any)
+      ind <- ifelse(is.na(ind),FALSE,ind)
+      predictors.test <- predictors.test[ind, ]
+      obs.test <- obs.test[ind, ]
+      rm(ind)
+      
+      # PREDICTION: Propogate posterior taxon-specific parameter distributions
+      # through the joint model
+      
+      # Transpose matrix of inputs (without ID columns)
+      X <- t(as.matrix(predictors.test[, inf.fact]))
+      
+      # Initialize array of dimensions s (samples),i (sites),j ()
+      # For each taxon, compute x_ik*beta_jk
+      m <- array(
+        apply(beta.taxa, 3, function(beta.K){
+          beta.K %*% X
+        }), 
+        dim=c(dim(beta.taxa)[1], nrow(predictors.test), dim(beta.taxa)[3])
+        # e.g., dim=c(10000, 580, 245) for full community
+      )
+      rm(beta.taxa); gc() # recover memory
+      
+      # Calculate predicted probabilities through the link function
+      # dimensions s, j, i
+      pred.fold <- array(
+        apply(m, 2, function(xb){
+          link.function(alpha.taxa + xb)
+        }),
+        dim=c(nrow(alpha.taxa), ncol(alpha.taxa), nrow(predictors.test))
+        # e.g., dim=c(10000, 245, 580) for full community
+      )
+      rm(m, alpha.taxa); gc() # recover memory
+      
+      dimnames(pred.fold)[[1]] <- 1:dim(pred.fold)[1]
+      dimnames(pred.fold)[[2]] <- colnames(occur.taxa)
+      dimnames(pred.fold)[[3]] <- predictors.test$SampId
+      
+      pred.fold <- melt(pred.fold)
+      setDT(pred.fold)
+      colnames(pred.fold) <- c("Sample", "Taxon", "SampId", "Pred")
+      pred.fold <- select(pred.fold, Taxon, SampId, Pred)
+      
+      # Append results and print output
+      pred[[paste("fold",k,sep="")]] <- pred.fold
+      # pred <- bind_rows(pred, pred.fold)
+      rm(pred.fold)
+      cat("Fold completed:", k, "\n")
+    }
+  }
+  gc()
+  return(pred)
+
+  # # Initialize array of dimensions s,i,k
+  # X <- t(X) # transpose X prior to using it in apply()
+  # # For each taxon, compute x*beta for each posterior sample, site, and variable
+  # m <- array(
+  #   apply(beta.taxa, 3, function(beta.K){
+  #   beta.K %*% X
+  #     }), 
+  #   dim=c(10000, 580, 245)
+  # )
+  # 
+  # gc()
+  # 
+  # # For each site, compute the probabilities
+  # predictions <- array(
+  #   apply(m, 2, function(x.beta){
+  #     link.function(alpha.taxa + x.beta)
+  #   }),
+  #   dim=c(10000, 245, 580)
+  # )
+  
+  # Parallelized implementation of probabilistic predictions in JSDM
+  # library(snow)
+  # cl <- makeCluster(4,type="SOCK")
+  # clusterExport(cl, list="X", envir = .GlobalEnv)
+  # m <- array(
+  #   parApply(cl=cl, beta.taxa, MARGIN=3, function(beta.K){
+  #     beta.K %*% X
+  #   }), 
+  #   dim=c(10000, 580, 245)
+  # )
+  # stopCluster(cl)
+  # 
+  # cl <- makeCluster(4,type="SOCK")
+  # clusterExport(cl, list="alpha.taxa", envir = .GlobalEnv)
+  # 
+  # predictions <- array(
+  #   parApply(cl=cl, m, 2, function(x.beta){
+  #     link.function(alpha.taxa + x.beta)
+  #   }),
+  #   dim=c(10000, 245, 580)
+  # )
+  # stop.cluster(cl)
 }
 
 # Process models ####
@@ -1071,6 +1210,10 @@ linear.predictor <- function(results){
   return(slopes)
 }
 
+# Extract residual deviance from a jSDM result
+extract.residuals <- function(results){
+}
+
 # Given jSDM results (list), extracts marginal posterior samples of taxon-specific parameters and returns a tidy data table
 extract.beta <- function(results){
   # Get beta samples
@@ -1219,7 +1362,7 @@ map.jsdm.taxon <- function(results, taxon, legend=TRUE){
   g <- g + scale_color_manual(name = "Observation", values=c("0" = "#FF0000", "1" = "#0077FF"), labels = c("Absence", "Presence"))
   g <- g + guides(colour = guide_legend(override.aes = list(size=6)))
   g <- g + labs(title = taxon.label,
-                size = "Probability of\noccurrence")
+                size = "Probability of\npresence")
   if (!legend){
     g <- g + guides(colour=FALSE, size=FALSE)
   }
@@ -2298,7 +2441,7 @@ plot.prob.taxon <- function(results, taxon, legend=TRUE){
   g <- g + theme_bw(base_size=15)
   g <- g + facet_wrap(~ Label, scales = "free_x", labeller=label_parsed, strip.position="bottom")
   g <- g + labs(title = taxon.label,
-    y = "Probability of occurrence",
+    y = "Probability of presence",
     color = "Observation")
   g <- g + theme(strip.background = element_blank(), 
                  strip.placement = "outside",
