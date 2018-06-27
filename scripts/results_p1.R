@@ -206,15 +206,89 @@ g <- g + theme_bw(base_size = 18)
 g <- g + theme(axis.title.y = element_text(size = 22), strip.text.x = element_text(size = 17))
 g <- g + theme(plot.title = element_text(hjust = 0.5), plot.subtitle = element_text(hjust = 0.5),
                strip.background = element_blank(), strip.placement = "outside")
-g <- g + labs(x = "", y = expression(paste("z"["ijk"])))
+g <- g + labs(x = "", y = expression(z[it[i]*jk]))
 g <- g + guides(alpha = FALSE)
+print(g)
 
 pdf('P1 - slopes jSDM.pdf', width = 13, height = 9, onefile=TRUE)
 print(g)
 dev.off()
 
-# Plot P1 - parameters jSDM [all taxa] ####
-plot.comm(jsdm, 'P1 - parameters jSDM [all taxa]')
+# Plot P1 - plot.comm() ####
+plot.comm(jsdm.p1, 'P1 - plot_comm [all taxa]')
+
+# Plot P1 - plot.comm() [example taxa] ####
+# Modified plot.comm() code for specific taxa.
+pdf('P1 - plot_comm [example taxa].pdf', onefile = TRUE)
+par(cex=1.25)
+for (k in 1:length(inf.fact)){
+  variable <- inf.fact[k]
+  responses <- response.bdms[response.bdms$Taxon %in% t, ]
+  
+  response <- responses[[variable]]
+  names(response) <- responses$Taxon
+  
+  response[response==0] <- "grey55"
+  response[response==1] <- "blue"
+  response[response==-1] <- "red"
+  cat("Plotting: ",variable,"\n")
+  # Test temperature as starting variable
+  samples <- taxon.samples[Variable == variable,]
+  
+  # Find the maximum density among the posterior taxon-specific posterior parameters
+  samples.sd <- samples %>%
+    group_by(Taxon) %>%
+    summarise(SD = sd(Value)) %>%
+    arrange(SD) # arrange from min to max
+  
+  sd <- samples.sd[1,]$Taxon
+  ymax.sample <- samples[Taxon == sd, ]
+  ymax <- density(ymax.sample$Value)
+  ymax <- max(ymax$y)
+  
+  # Plot the community parameter distribution
+  mu <- bdms.stan$mu.beta.comm.maxpost[variable]
+  sd <- bdms.stan$sigma.beta.comm.maxpost[variable]
+  x <- seq(mu-4*sd,mu+4*sd,length.out=201)
+  beta.comm.density <- dnorm(x, mu, sd)
+  beta.taxa.maxpost.density <- density(bdms.stan$beta.taxa.maxpost[variable, ])
+  
+  # Match expressions to influence factors
+  labels <- c("Temp" = expression(paste(beta["Temp"], " (1/", degree, "C)")),
+              "Temp2" = expression(paste(beta["Temp"^2], " (1/", degree, "C"^2,")")),
+              "FV" = expression(paste(beta["FV"], " (s/m)")),
+              "F10m" = expression(paste(beta["F10m"], " (1/%)")),
+              "IAR" = expression(paste(beta["IAR"], " 1/(spray treatments * fraction cropland)")),
+              "Urban" = expression(paste(beta["Urban"], " (1/%)")),
+              "LUD" = expression(paste(beta["LUD"], " (km"^2,"/CE)"))
+  )
+  
+  plot(numeric(0), numeric(0),
+       xlim = c(min(x), max(x)),
+       ylim=c(0, ymax-(ymax*0.25)),
+       xlab = labels[variable],
+       ylab = "Density")
+  abline(v=0)
+  # Plot the taxon-specific parameters
+  t <- c("Gammaridae", "Nemoura_minima", "Protonemura_lateralis")
+  l <- c("G", "N", "P")
+  
+  for (j in 1:length(t)){
+    taxon <- t[j]
+    sample <- samples[Taxon==taxon,]
+    sample <- sample$Value
+    
+    lines(density(sample), type="l", col=alpha(response[taxon], 1), lwd=1.25)
+    text(x=mean(sample), y=max(density(sample)$y)+0.1*max(density(sample)$y), labels = l[j])
+  }
+  # Plot community parameter distribution
+  lines(x, beta.comm.density, type="l", col = "grey50", lwd = 5)
+  # Plot maximum posterior values over all taxa
+  lines(beta.taxa.maxpost.density, type="l", col="black", lwd=2, lty='longdash')
+  
+}
+dev.off()
+
 
 # Plot P1 - significant responses ####
 bdms.stan <- select.jsdm(jsdm.p1) # retrieve Stan.fit object
@@ -227,7 +301,7 @@ taxon.samples <- setDT(taxon.samples)
 taxon.samples$Variable <- as.character(taxon.samples$Variable)
 taxon.samples$Taxon <- as.character(taxon.samples$Taxon)
 
-response.bdms <- extract.resp(jsdm)
+response.bdms <- extract.resp(jsdm.p1)
 # Based on quality-of-fit and predictive performance, find taxa of interest that:
 temp <- cv.plot %>%
   filter(Model=="jSDM") %>%
@@ -278,6 +352,7 @@ btr.int <- btr.int[, c("Taxon", "n", inf.fact)]
 btr.plot <- btr.int[btr.int$n > 56, c(inf.fact)]
 btr.plot <- apply(btr.plot, 2, as.numeric)
 row.names(btr.plot) <- paste(sub("_", " ", btr.int$Taxon[btr.int$n > 56]), " - ", n.bdms[btr.int$Taxon[btr.int$n > 56]])
+btr.plot <- btr.plot[, c("Temp", "Temp2", "FV", "F10m", "IAR", "Urban", "LUD")]
 
 # Select the number of clusters
 d <- dist(btr.plot, method="euclidean")
@@ -287,113 +362,65 @@ rect.hclust(pfit, k=4)
 
 library(pheatmap)
 # Save manually
-pheatmap(btr.plot, col=c("tomato3", "snow3", "royalblue4"), cellwidth=30, cellheight=11, cluster_rows=T, cutree_rows=5, cluster_cols=F, clustering_distance_rows = "euclidean", legend=F, show_rownames=TRUE, fontsize=13, fontsize_col=15, labels_col = labeller.names(inf.fact))
+pheatmap(btr.plot, col=c("tomato3", "snow3", "royalblue4"), cellwidth=30, cellheight=11, cluster_rows=T, cutree_rows=5, cluster_cols=F, clustering_distance_rows = "euclidean", legend=F, show_rownames=TRUE, fontsize=13, fontsize_col=15, labels_col = labeller.names(c("Temp", "Temp2", "FV", "F10m", "IAR", "Urban", "LUD")))
 
 
 # Plot P1 - significant responses [all taxa] ####
 btr.all <- response.bdms
 btr.all <- as.data.table(btr.all)
 btr.all <- arrange(btr.all, desc(n))
-btr.all$Label <- factor(paste(sub("_", " ", btr.all$Taxon), " - ", btr.all$n), levels=paste(sub("_", " ", btr.all$Taxon), " - ", btr.all$n))
-plot.data <- gather(btr.all, Variable, Value, -Taxon, -Label, -n)
+btr.all$TaxonLabel <- factor(paste(btr.all$Taxon, " - ", btr.all$n), levels=paste(names(sort(n.bdms)), " - ", sort(n.bdms)))
 
-g <- ggplot(plot.data, aes(x = Variable, y = Label))
-g <- g + geom_tile(aes(fill = Value), colour = "white")
+# plot.data$Labels <- factor(paste(plot.data$Taxon, ' - ', n.bdms[plot.data$Taxon]), levels = paste(names(sort(n.bdms)), ' - ', sort(n.bdms)))
+
+plot.data <- gather(btr.all, Variable, Value, -Taxon, -TaxonLabel, -n)
+plot.data$VariableLabel <- factor(plot.data$Variable, levels=c("Temp", "Temp2", "FV", "F10m", "IAR", "Urban", "LUD"))
+
+g <- ggplot(plot.data, aes(x = VariableLabel, y = TaxonLabel))
+g <- g + geom_tile(aes(fill = as.factor(Value)), colour = "white")
 g <- g + scale_fill_manual(values=c("tomato3", "snow3", "royalblue4"))
 g <- g + theme_minimal(base_size = 15)
+g <- g + labs(fill = "Response",
+              y = "Taxon and prevalence",
+              x = "Explanatory Variable")
 pdf('jSDM heatmap ALL.pdf', paper='special', height=56, width=8.5)
 print(g)
 dev.off()
 
 
-# Plot P1 - parameters jSDM [example taxa] ####
-# Modified plot.comm() code for specific taxa.
-pdf('jSDM parameter distributions [example taxa].pdf', onefile = TRUE)
-par(cex=1.25)
-for (k in 1:length(inf.fact)){
-  variable <- inf.fact[k]
-  responses <- response.bdms[response.bdms$Taxon %in% t, ]
-  
-  response <- responses[[variable]]
-  names(response) <- responses$Taxon
-  
-  response[response==0] <- "grey55"
-  response[response==1] <- "blue"
-  response[response==-1] <- "red"
-  cat("Plotting: ",variable,"\n")
-  # Test temperature as starting variable
-  samples <- taxon.samples[Variable == variable,]
-  
-  # Find the maximum density among the posterior taxon-specific posterior parameters
-  samples.sd <- samples %>%
-    group_by(Taxon) %>%
-    summarise(SD = sd(Value)) %>%
-    arrange(SD) # arrange from min to max
-  
-  sd <- samples.sd[1,]$Taxon
-  ymax.sample <- samples[Taxon == sd, ]
-  ymax <- density(ymax.sample$Value)
-  ymax <- max(ymax$y)
-  
-  # Plot the community parameter distribution
-  mu <- bdms.stan$mu.beta.comm.maxpost[variable]
-  sd <- bdms.stan$sigma.beta.comm.maxpost[variable]
-  x <- seq(mu-4*sd,mu+4*sd,length.out=201)
-  beta.comm.density <- dnorm(x, mu, sd)
-  beta.taxa.maxpost.density <- density(bdms.stan$beta.taxa.maxpost[variable, ])
-  
-  # Match expressions to influence factors
-  labels <- c("Temp" = expression(paste(beta["Temp"], " (1/", degree, "C)")),
-              "Temp2" = expression(paste(beta["Temp"^2], " (1/", degree, "C)")),
-              "FV" = expression(paste(beta["FV"], " (s/m)")),
-              "F10m" = expression(paste(beta["F10m"], " (1/%)")),
-              "IAR" = expression(paste(beta["IAR"], " 1/(spray treatments * fraction cropland)")),
-              "Urban" = expression(paste(beta["Urban"], " (1/%)")),
-              "LUD" = expression(paste(beta["LUD"], " (km"^2,"/CE)"))
-  )
-  
-  plot(numeric(0), numeric(0),
-       xlim = c(min(x), max(x)),
-       ylim=c(0, ymax-(ymax*0.25)),
-       xlab = labels[variable],
-       ylab = "Density")
-  abline(v=0)
-  # Plot the taxon-specific parameters
-  t <- c("Gammaridae", "Nemoura_minima", "Protonemura_lateralis")
-  l <- c("G", "N", "P")
-  
-  for (j in 1:length(t)){
-    taxon <- t[j]
-    sample <- samples[Taxon==taxon,]
-    sample <- sample$Value
-    
-    lines(density(sample), type="l", col=alpha(response[taxon], 1), lwd=1.25)
-    text(x=mean(sample), y=max(density(sample)$y)+0.1*max(density(sample)$y), labels = l[j])
-  }
-  # Plot community parameter distribution
-  lines(x, beta.comm.density, type="l", col = "grey50", lwd = 5)
-  # Plot maximum posterior values over all taxa
-  lines(beta.taxa.maxpost.density, type="l", col="black", lwd=2, lty='longdash')
-  
-}
-dev.off()
-
-# Plot P1 - prob jSDM [labelled]
-plot.prob(isdm, 'P1 - prob vs inputs iSDM')
-plot.prob(jsdm, 'P1 - prob vs inputs jSDM')
 
 # Plot P1 - maps ijSDM ####
-map.isdm(isdm, 'P1 - maps iSDM')
-map.jsdm(jsdm, 'P1 - maps jSDM')
+map.isdm(isdm.p1, 'P1 - maps iSDM')
+map.jsdm(jsdm.p1, 'P1 - maps jSDM')
+
+# Plot P1 - prob jSDM [labelled] ####
+plot.prob(isdm.p1, 'P1 - prob vs inputs iSDM')
+plot.prob(jsdm.p1, 'P1 - prob vs inputs jSDM')
 
 # Grid arrange prob.taxon and map.taxon plots
-g1 <- plot.prob.taxon(jsdm, "Gammaridae", legend=FALSE)
-g2 <- map.jsdm.taxon(jsdm, "Gammaridae", legend=FALSE)
-g3 <- map.jsdm.taxon(jsdm, "Nemoura_minima", legend=FALSE)
-g4 <- map.jsdm.taxon(jsdm, "Protonemura_lateralis", legend=FALSE)
+g1 <- plot.prob.taxon(jsdm.p1, "Gammaridae", legend=FALSE)
+g2 <- map.jsdm.taxon(jsdm.p1, "Gammaridae", legend=FALSE)
+g3 <- map.jsdm.taxon(jsdm.p1, "Nemoura_minima", legend=FALSE)
+g4 <- map.jsdm.taxon(jsdm.p1, "Protonemura_lateralis", legend=FALSE)
 
 library(cowplot)
 plot_grid(g1,g2,g3,g4, labels=c("(a)", "(b)", "(c)", "(d)"), align="hv")
+
+# Grid arrange prob.taxon and map.taxon plots
+g1 <- plot.prob.taxon(jsdm.p1, "Gammaridae", legend=FALSE)
+g2 <- fit.jsdm.pred.taxon(jsdm.p1, "Gammaridae", legend=FALSE)
+g3 <- fit.jsdm.pred.taxon(jsdm.p1, "Nemoura_minima", legend=FALSE)
+g4 <- fit.jsdm.pred.taxon(jsdm.p1, "Protonemura_lateralis", legend=FALSE)
+
+pdf('P1 - example taxa.pdf', width=13, height=9.5)
+plot_grid(g1,g2,g3,g4, labels=c("(a)", "(b)", "(c)", "(d)"), align="hv")
+dev.off()
+
+# pdf('P1 - example taxa [gammaridae map].pdf', width=13, height=9.5)
+# g2 <- fit.jsdm.pred.taxon(jsdm.p1, "Gammaridae", legend=TRUE)
+# g2
+# dev.off()
+
 
 # library(gridExtra)
 # library(grid)
@@ -423,64 +450,154 @@ map.inputs(x, 'P1 - maps influence factors')
 
 # Plot P1 - parameter SD ####
 # Extract the entire posterior beta sample
-jsdm.beta.samples <- extract.beta(jsdm)
+jsdm.beta.samples <- extract.beta(jsdm.p1)
 
 # Fast aggregation of 10M row dataset
 plot.data <- jsdm.beta.samples %>%
   group_by(Taxon, Variable) %>%
-  summarise(SD = sd(Value), Mean = mean(Value))
+  summarise(SD = sd(Value), Mean = mean(Value)) %>%
+  mutate(n = n.bdms[Taxon], Label = factor(Variable, levels=c("Temp", "Temp2", "FV", "F10m",  "IAR",   "Urban", "LUD")), rSD = SD/abs(Mean))
 
-plot.data$n <- n.bdms[plot.data$Taxon]
-
-plot.data$Label <- factor(plot.data$Variable, levels = inf.fact)
 levels(plot.data$Label) <- labeller(levels(plot.data$Label))
+setDT(plot.data)
+# g <- ggplot(data=plot.data, aes(x = n, y = SD, size = n))
+# g <- g + geom_point(alpha = 0.5)
+# g <- g + facet_grid(Label ~ ., scales = "free", labeller=label_parsed)
+# g <- g + theme_bw(base_size = 14)
+# g <- g + theme(strip.background=element_rect(fill="grey"),strip.text=element_text(color="black", face="bold"),
+#                plot.title = element_text(hjust = 0.5, size = 12))
+# g <- g + labs(title = expression(paste("Standard deviation of posterior taxon-specific parameter distributions ", beta["jk"]^"taxa")),
+#               x = "Prevalence",
+#               y = expression(paste("Standard deviation (", sigma[beta["jk"]^"taxa"],")")),
+#               size = "Prevalence")
+# g <- g + scale_y_continuous(limits=c(0,NA))
+# pdf('P1 - parameter SD.pdf', height = 12.5)
+# print(g)
+# dev.off()
 
-g <- ggplot(data=plot.data, aes(x = n, y = SD, size = n))
-g <- g + geom_point(alpha = 0.5)
-g <- g + facet_grid(Label ~ ., scales = "free", labeller=label_parsed)
-g <- g + theme_bw(base_size = 14)
-g <- g + theme(strip.background=element_rect(fill="grey"),strip.text=element_text(color="black", face="bold"),
-               plot.title = element_text(hjust = 0.5, size = 12))
-g <- g + labs(title = expression(paste("Standard deviation of posterior taxon-specific parameter distributions ", beta["jk"]^"taxa")),
-              x = "Prevalence",
-              y = expression(paste("Standard deviation (", sigma[beta["jk"]^"taxa"],")")),
-              size = "Prevalence")
-g <- g + scale_y_continuous(limits=c(0,NA))
-pdf('P1 - parameter SD.pdf', height = 12.5)
-print(g)
-dev.off()
+# # Plot P1 - parameter uncertainty ####
+# g <- ggplot(data=plot.data, aes(x = n, y = rSD, size = n))
+# g <- g + geom_point(alpha = 0.5)
+# g <- g + facet_wrap(~ Variable, labeller=label_parsed)
+# g <- g + theme_bw(base_size = 13)
+# g <- g + theme(strip.background=element_rect(fill="black"), strip.text=element_text(color="white", face="bold"), plot.title = element_text(hjust = 0.5), plot.subtitle = element_text(hjust = 0.5))
+# g <- g + labs(title = expression(paste(sigma,"/",mu)),
+#               x = expression(paste("Mean (", mu[beta["jk"]^"taxa"],")")),
+#               y = expression(paste("Standard deviation/mean (", sigma[beta["jk"]^"taxa"],"/", mu[beta["jk"]^"taxa"],"))")),
+#               size = "Total occurrences")
+# print(g)
 
-# Plot P1 - parameter uncertainty ####
-plot.data$rSD <- plot.data$SD/plot.data$Mean
-g <- ggplot(data=plot.data, aes(x = n, y = rSD, size = n))
-g <- g + geom_point(alpha = 0.5)
-g <- g + facet_wrap(~ Variable, labeller=label_parsed)
-g <- g + theme_bw(base_size = 13)
-g <- g + theme(strip.background=element_rect(fill="black"), strip.text=element_text(color="white", face="bold"), plot.title = element_text(hjust = 0.5), plot.subtitle = element_text(hjust = 0.5))
-g <- g + labs(title = expression(paste(sigma,"/",mu)),
-              x = expression(paste("Mean (", mu[beta["jk"]^"taxa"],")")),
-              y = expression(paste("Standard deviation/mean (", sigma[beta["jk"]^"taxa"],"/", mu[beta["jk"]^"taxa"],"))")),
-              size = "Total occurrences")
-print(g)
+plot.data$Variable <- factor(plot.data$Variable, levels=inf.fact)
+# levels(plot.data$Variable) <- labeller(levels(plot.data$Variable))
 
-
-bssd.cv <- plot.data %>%
-  mutate(rSD = SD/abs(Mean))
-bssd.cv$Label <- factor(bssd.cv$Variable, levels = c("Temp", "Temp2", "FV", "F10m", "IAR", "Urban", "LUD"))
-
-g <- ggplot(data=bssd.cv)
-g <- g + geom_boxplot(aes(Label, rSD, fill=Label))
+g <- ggplot(data=plot.data)
+g <- g + geom_boxplot(aes(x=Variable, y=rSD, fill=Variable))
 g <- g + coord_cartesian(ylim=c(0,10))
-g <- g + theme_bw(base_size = 15)
-g <- g + theme(strip.background=element_rect(fill="black"), strip.text=element_text(color="white", face="bold"),
-               plot.title = element_text(hjust = 0.5, size = 12), axis.text = element_text(size = 12))
+g <- g + theme_bw()
+g <- g + theme(plot.title = element_text(hjust = 0.5, size = 12), 
+               axis.text = element_text(size = 12),
+               axis.text.x = element_text(angle=45, hjust=1, vjust=0.5))
 g <- g + scale_fill_brewer(palette = "Set1")
 g <- g + guides(fill=FALSE)
-g <- g + labs(title =  expression(paste("Relative uncertainty in the posterior taxon-specific parameter distributions ", beta["jk"]^"taxa")),
-              x = "Influence factor",
+g <- g + labs(title = expression(paste("Relative uncertainty of posterior taxon-specific parameter distributions ", beta["jk"]^"taxa")),
+              x = "Explanatory variable",
               y = expression(paste("Relative standard deviation (", sigma[beta["jk"]^"taxa"]," / |",mu[beta["jk"]^"taxa"],"|)")))
 pdf('P1 - parameter uncertainty.pdf')
 print(g)
+dev.off()
+
+# Plot P1 - predictive uncertainty ####
+pred <- pred.jsdm("bdms")
+gc()
+
+# what about binding the probabilities manually?
+taxon <- "Baetis_alpinus"
+f1 <- pred$fold1[Taxon=="taxon",]
+f2 <- pred$fold2[Taxon=="taxon",]
+f3 <- pred$fold3[Taxon=="taxon",]
+
+dt <- bind_rows(f1,f2,f3)
+dt <- left_join(dt, sample.bdms[, c("SampId", taxon)], by="SampId")
+colnames(dt) <- c("Taxon", "SampId", "Pred", "Obs")
+
+rm(f1,f2,f3)
+
+# Order samples by decreasing mean predicted probability
+test <- dt %>%
+  group_by(SampId) %>%
+  summarise(mean.Pred = mean(Pred)) %>%
+  arrange(-mean.Pred)
+
+
+plot.data <- na.omit(dt)
+plot.data$SampId <- factor(plot.data$SampId, levels=test$SampId)
+plot.data$Obs <- as.factor(plot.data$Obs)
+rm(test)
+
+g <- ggplot(plot.data)
+g <- g + stat_density_ridges(aes(x = Pred, y = SampId, fill = Obs), size = 10, color=NA, rel_min_height=0.01, scale=10, alpha = 0.5)
+# g <- g + theme_bw(base_size=17)
+g <- g + theme_pubr()
+g <- g + theme(#plot.title=element_blank(),
+  axis.ticks.x = element_blank(),
+  axis.text.x = element_blank(),
+  panel.background = element_rect(color = "white"))
+
+g <- g + guides(colour = guide_legend(override.aes = list(size=6)))
+g <- g + labs(title="Predictions from k-fold cross-validation",
+              x="Posterior probability",
+              y="Sample sites (ordered by mean probability)",
+              fill="Observation")
+g <- g + scale_fill_manual(values= c("1" = "blue", "0" = "red"), labels=c("Presence", "Absence"))
+g <- g + coord_flip()
+pdf('Predictive uncertainty.pdf', width = 10, height = 7)
+g
+dev.off()
+
+# Plot P1 - map predictive uncertainty ####
+ch <- fortify(inputs$ch)
+
+dt <- fit.jsdm.pred(jsdm.p1) # Get predicted probabilities with default quantiles c(0.05, 0.95)
+dt <- left_join(dt, inputs$xy, by="SiteId")
+setDT(dt)
+
+plot.data <- na.omit(dt)
+plot.data$Obs <- as.factor(plot.data$Obs)
+
+
+taxa <- occur.freq(jsdm.p1$bdms$occur.taxa)
+
+pdf(paste("jsdm uncertainty.pdf", sep=''), paper = 'special', width = 10.5, onefile = TRUE)
+for (j in 1:length(taxa)){
+  taxon <- names(taxa[j])
+  
+  plot.data$Alpha <- ifelse(plot.data$Quantile==0.05, 0.65, 0.35)
+  plot.data$Alpha <- as.factor(plot.data$Alpha)
+  plot.data.05 <- plot.data[Quantile==0.05 & Taxon==taxon,]
+  plot.data.95 <- plot.data[Quantile==0.95 & Taxon==taxon,]
+
+  g <- ggplot()
+  g <- g + geom_polygon(data = ch, aes(x = long, y = lat, group = group), fill=NA, color="black")
+  g <- g + geom_point(data = plot.data.05, aes(X, Y, color = Obs, size = Pred, alpha=Alpha), stroke = 0)
+  g <- g + geom_point(data = plot.data.95, aes(X, Y, color = Obs, size = Pred, alpha = Alpha))
+  g <- g + scale_radius(limits = c(0,1), breaks =seq(0, 1, 0.2), range = c(2, 6))
+  g <- g + labs(title = paste("Probability of occurrence vs observations of", taxon),
+                subtitle = paste("jSDM:", paste(jsdm.p1$bdms$inf.fact, collapse = "+", sep = " "), "- page", j),
+                x = "",
+                y = "")
+  g <- g + theme(plot.title = element_text(hjust = 0.5), plot.subtitle = element_text(hjust = 0.5))
+  g <- g + scale_y_continuous(breaks=NULL)
+  g <- g + scale_x_continuous(breaks=NULL)
+  g <- g + guides(colour = guide_legend(override.aes = list(size=6)),
+                  alpha = guide_legend(override.aes = list(size=6, stroke=0)))
+  g <- g + labs(size = "Probability of\noccurrence",
+                alpha = "Posterior\nquantile")
+  g <- g + scale_color_manual(name = "Observation", values=c("0" = "#FF0000", "1" = "#0077FF"), labels=c("Absence", "Presence"))
+  g <- g + scale_alpha_manual(name = "Posterior\nquantile", values=c("0.65"="0.75", "0.35"="0.25"), labels=c("5th percentile", "95th percentile"))
+  g <- g + theme_minimal(base_size = 15)
+  cat("Plotting taxon: ", taxon, "\n")
+  print(g)
+}
 dev.off()
 
 # Table P1 - Count significant responses ####
@@ -551,7 +668,7 @@ pairs.panels(epsilon.plot, density = TRUE, scale=FALSE, hist.col="grey", cex.cor
 # Plot P1 - parameter dotplot [4 pages] ####
 # Warning: really bad code ahead...
 # Extract the entire posterior beta sample
-jsdm.beta.samples <- extract.beta(jsdm)
+jsdm.beta.samples <- extract.beta(jsdm.p1)
 
 jsdm.beta.samples.quantiles <- jsdm.beta.samples %>%
   group_by(Variable, Taxon) %>%
@@ -559,7 +676,7 @@ jsdm.beta.samples.quantiles <- jsdm.beta.samples %>%
   setDT()
 colnames(jsdm.beta.samples.quantiles)<- c("Variable", "Taxon", "quantile10", "quantile90")
 
-isdm.beta <- isdm$parameters
+isdm.beta <- isdm.p1$parameters
 if ("Model" %in% colnames(isdm.beta)){
   isdm.beta$Model <- NULL
 }
@@ -576,7 +693,7 @@ for (page in 1:pages){
   plot.data <- jsdm.beta.samples.quantiles[jsdm.beta.samples.quantiles$Taxon %in% names(tpp[page][[1]]), ]
   
   # Prepare the jSDM parameter values
-  beta.max <- select(jsdm$parameters, Taxon, Variable, Parameter)
+  beta.max <- select(jsdm.p1$parameters, Taxon, Variable, Parameter)
   colnames(beta.max) <- c("Taxon", "Variable", "jSDM.parameter")
   beta.max$Variable <- as.character(beta.max$Variable)
   
@@ -611,8 +728,8 @@ for (page in 1:pages){
   plot.data$Labels <- factor(paste(plot.data$Taxon, ' - ', n.bdms[plot.data$Taxon]), levels = paste(names(sort(n.bdms)), ' - ', sort(n.bdms)))
   
   # Order variable facets and pass expressions for units in facet labels
-  plot.data$Variable <- factor(plot.data$Variable, levels = c(inf.fact))
-  levels(plot.data$Variable) <- labeller(inf.fact)
+  plot.data$Variable <- factor(plot.data$Variable, levels = c("Temp", "Temp2", "FV", "F10m", "IAR", "Urban", "LUD"))
+  levels(plot.data$Variable) <- labeller(c("Temp", "Temp2", "FV", "F10m", "IAR", "Urban", "LUD"))
 
   # Build the plot
   g <- ggplot(plot.data)
@@ -624,7 +741,7 @@ for (page in 1:pages){
   g <- g + theme_bw()
   g <- g + labs(title = "Taxon-specific parameter estimates by model",
                 subtitle = "MLEs (iSDM) and maximum posterior (jSDM) with 10th-90th percentile interval",
-                x = "Occurrence frequency and taxon",
+                x = "Taxon and prevalance",
                 y = "Value")
   g <- g + theme(axis.text.x=element_text(angle=90, hjust=1, vjust=0.5))
   g <- g + scale_colour_identity()

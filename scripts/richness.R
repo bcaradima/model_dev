@@ -4,7 +4,7 @@
 obs <- data.table(gather(sample.bdms, Taxon, Obs, -SiteId, -SampId))
 
 rank <- lapply(unique(obs$Taxon), function(j){
-  taxon.rank(j)
+  taxon.rank(j) # ID the taxonomic resolution (i.e., "rank") of each taxon
 })
 rank <- rbindlist(rank)
 

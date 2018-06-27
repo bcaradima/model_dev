@@ -85,6 +85,12 @@ bdms <- read.csv('inputs/BDM_occ_data_2017-07-25.dat', sep='\t', header=TRUE, na
 
 bdms <- bdms[bdms$samp.wind=='pref' | bdms$samp.wind=='buf', ]
 
+# Are there repeated samples at a site per year?
+sample.check <- sites %>%
+  select(SiteId, SampId, Day, Month, Year, X, Y) %>%
+  group_by(SiteId) %>%
+  summarise(n.samples=n(), n.years=uniqueN(Year)) 
+
 # Clean BDM dataset column names
 bdms <- select(bdms, SiteId, SampId, contains("Occurrence.group."), contains("Occurrence."))
 ind <- !(colnames(bdms) %in% c("SiteId", "SampId"))
