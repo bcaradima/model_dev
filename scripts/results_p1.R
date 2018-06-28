@@ -389,14 +389,15 @@ dev.off()
 
 
 
-# Plot P1 - maps ijSDM ####
+# Plot P1 - map.ijSDM() ####
 map.isdm(isdm.p1, 'P1 - maps iSDM')
 map.jsdm(jsdm.p1, 'P1 - maps jSDM')
 
-# Plot P1 - prob jSDM [labelled] ####
+# Plot P1 - plot.prob() [labelled] ####
 plot.prob(isdm.p1, 'P1 - prob vs inputs iSDM')
 plot.prob(jsdm.p1, 'P1 - prob vs inputs jSDM')
 
+# Plot map.jsdm.pred.taxon() examples####
 # Grid arrange prob.taxon and map.taxon plots
 g1 <- plot.prob.taxon(jsdm.p1, "Gammaridae", legend=FALSE)
 g2 <- map.jsdm.taxon(jsdm.p1, "Gammaridae", legend=FALSE)
@@ -408,14 +409,21 @@ plot_grid(g1,g2,g3,g4, labels=c("(a)", "(b)", "(c)", "(d)"), align="hv")
 
 # Grid arrange prob.taxon and map.taxon plots
 g1 <- plot.prob.taxon(jsdm.p1, "Gammaridae", legend=FALSE)
-g2 <- fit.jsdm.pred.taxon(jsdm.p1, "Gammaridae", legend=FALSE)
-g3 <- fit.jsdm.pred.taxon(jsdm.p1, "Nemoura_minima", legend=FALSE)
-g4 <- fit.jsdm.pred.taxon(jsdm.p1, "Protonemura_lateralis", legend=FALSE)
+g2 <- map.jsdm.pred.taxon(jsdm.p1, "Gammaridae", legend=FALSE)
+g3 <- map.jsdm.pred.taxon(jsdm.p1, "Nemoura_minima", legend=FALSE)
+g4 <- map.jsdm.pred.taxon(jsdm.p1, "Protonemura_lateralis", legend=FALSE)
 
 pdf('P1 - example taxa.pdf', width=13, height=9.5)
 plot_grid(g1,g2,g3,g4, labels=c("(a)", "(b)", "(c)", "(d)"), align="hv")
 dev.off()
 
+# pdf('P1 - map jSDM [Gammaridae].pdf', width=13, height=9.5)
+g <- map.jsdm.pred.taxon(jsdm.p1, "Gammaridae", legend=TRUE)
+# SVG produced to transfer legend to grid-arrange plot above.
+# requires library(svglite)
+ggsave(file="P1 - map jSDM [Gammaridae].svg", plot=g, width=13, height=9.50)
+
+# dev.off()
 # pdf('P1 - example taxa [gammaridae map].pdf', width=13, height=9.5)
 # g2 <- fit.jsdm.pred.taxon(jsdm.p1, "Gammaridae", legend=TRUE)
 # g2
@@ -557,44 +565,53 @@ dev.off()
 # Plot P1 - map predictive uncertainty ####
 ch <- fortify(inputs$ch)
 
-dt <- fit.jsdm.pred(jsdm.p1) # Get predicted probabilities with default quantiles c(0.05, 0.95)
+dt <- extract.jsdm.pred(jsdm.p1) # Get predicted probabilities with default quantiles c(0.05, 0.95)
 dt <- left_join(dt, inputs$xy, by="SiteId")
 setDT(dt)
 
-plot.data <- na.omit(dt)
-plot.data$Obs <- as.factor(plot.data$Obs)
-
+# Format data for ggplot() aesthetics
+dt <- na.omit(dt)
+dt$Obs <- as.factor(dt$Obs)
+dt$Alpha <- ifelse(dt$Quantile==0.05, 0.65, 0.35)
+dt$Alpha <- as.factor(dt$Alpha)
+dt$Shape <- ifelse(dt$Quantile==0.05, 19, 21)
+dt$Stroke <- ifelse(dt$Quantile==0.05, 0, 0.75)
 
 taxa <- occur.freq(jsdm.p1$bdms$occur.taxa)
 
-pdf(paste("jsdm uncertainty.pdf", sep=''), paper = 'special', width = 10.5, onefile = TRUE)
+pdf(paste("P1 - maps jSDM.pdf", sep=''), paper = 'special', width = 10.5, onefile = TRUE)
 for (j in 1:length(taxa)){
   taxon <- names(taxa[j])
   
-  plot.data$Alpha <- ifelse(plot.data$Quantile==0.05, 0.65, 0.35)
-  plot.data$Alpha <- as.factor(plot.data$Alpha)
-  plot.data.05 <- plot.data[Quantile==0.05 & Taxon==taxon,]
-  plot.data.95 <- plot.data[Quantile==0.95 & Taxon==taxon,]
-
+  plot.data <- dt[Taxon==taxon, ]
+  
+  # Map geometries
   g <- ggplot()
   g <- g + geom_polygon(data = ch, aes(x = long, y = lat, group = group), fill=NA, color="black")
-  g <- g + geom_point(data = plot.data.05, aes(X, Y, color = Obs, size = Pred, alpha=Alpha), stroke = 0)
-  g <- g + geom_point(data = plot.data.95, aes(X, Y, color = Obs, size = Pred, alpha = Alpha))
-  g <- g + scale_radius(limits = c(0,1), breaks =seq(0, 1, 0.2), range = c(2, 6))
+  g <- g + geom_point(data = plot.data, aes(X, Y, size = Pred, alpha = Alpha, color = Obs, stroke = Stroke, shape = Shape))
+  
+  # Configure themes and labels
   g <- g + labs(title = paste("Probability of occurrence vs observations of", taxon),
                 subtitle = paste("jSDM:", paste(jsdm.p1$bdms$inf.fact, collapse = "+", sep = " "), "- page", j),
                 x = "",
-                y = "")
+                y = "",
+                size = "Probability of\noccurrence",
+                alpha = expression(paste("Posterior ", beta["jk"])),
+                color = "Observation")
+  g <- g + theme_minimal(base_size = 15)
   g <- g + theme(plot.title = element_text(hjust = 0.5), plot.subtitle = element_text(hjust = 0.5))
+  
+  # Configure legends and scales
+  g <- g + guides(size = guide_legend(override.aes = list(color="black", stroke=0)),
+                  color = guide_legend(override.aes = list(size=6, stroke=0)),
+                  alpha = guide_legend(override.aes = list(size=6, shape=c(19,21), stroke=c(0,0.75), color="black")))
   g <- g + scale_y_continuous(breaks=NULL)
   g <- g + scale_x_continuous(breaks=NULL)
-  g <- g + guides(colour = guide_legend(override.aes = list(size=6)),
-                  alpha = guide_legend(override.aes = list(size=6, stroke=0)))
-  g <- g + labs(size = "Probability of\noccurrence",
-                alpha = "Posterior\nquantile")
-  g <- g + scale_color_manual(name = "Observation", values=c("0" = "#FF0000", "1" = "#0077FF"), labels=c("Absence", "Presence"))
-  g <- g + scale_alpha_manual(name = "Posterior\nquantile", values=c("0.65"="0.75", "0.35"="0.25"), labels=c("5th percentile", "95th percentile"))
-  g <- g + theme_minimal(base_size = 15)
+  g <- g + scale_radius(limits = c(0,1), breaks = seq(0, 1, 0.2), range = c(2, 6))
+  g <- g + scale_color_manual(values=c("0" = "#FF0000", "1" = "#0077FF"), labels=c("Absence", "Presence"))
+  g <- g + scale_alpha_manual(values=c("0.65"="0.65", "0.35"="0.35"), labels=c("95th quantile", "5th quantile"))
+  g <- g + scale_shape_identity()
+
   cat("Plotting taxon: ", taxon, "\n")
   print(g)
 }

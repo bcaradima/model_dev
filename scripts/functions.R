@@ -278,8 +278,8 @@ likelihood <- function(par, env.cond, y){
   return(dev)
 }
 
-# Fits an individual generalized linear model (GLM) per taxon in a community matrix
-# and outputs tidy data (parameters, deviance, probabilities)
+# Fits an individual generalized linear model (GLM) per taxon given site-species and predictor data,
+# outputs a list storing the models and tidy data of (parameters, deviance, probabilities)
 run.isdm <- function(cm, predictors, trace) {
   cm <- as.data.frame(cm)
   predictors <- as.data.frame(predictors)
@@ -847,25 +847,91 @@ extract.vse <- function(trial, sample){
   return(d)
 }
 
-# Extract probabilities from run.isdm() object
-extract.prob <- function(results){
-  taxa <- names(results$taxa)
-  # Get probabilities
-  probability <- lapply(taxa, function(j){
-    # cat("Taxon:", j,"\n")
-    m <- select.isdm(results, j)
-    
-    prob <- m$fitted.values
-    
-    dt <- mdata[, c("SiteId", "SampId", j)]
-    colnames(dt) <- c("SiteId", "SampId", "Obs")
-    dt <- na.omit(dt)
-    dt$Taxon <- j
-    dt$Pred <- m$fitted.values
-    dt$Model <- "iSDM"
-    dt <- dt[, c("SiteId", "SampId", "Taxon", "Obs", "Pred", "Model")]
+
+extract.jsdm.pred <- function(result, quantiles=c(0.05, 0.95)){
+  jsdm <- select.jsdm(result)
+  
+  # Extract objects from workspace image to local environment
+  sites <- jsdm$sites
+  samples <- jsdm$samples
+  occur.taxa <- jsdm$occur.taxa
+  env.cond <- jsdm$env.cond
+  inf.fact <- jsdm$inf.fact
+  
+  # Name dimensions of beta^taxa array
+  dimnames(jsdm[["beta_taxa"]])[[1]] <- 1:dim(jsdm[["beta_taxa"]][,,])[1]
+  dimnames(jsdm[["beta_taxa"]])[[2]] <- inf.fact
+  dimnames(jsdm[["beta_taxa"]])[[3]] <- colnames(occur.taxa)
+  
+  # Name dimensions of alpha^taxa array
+  dimnames(jsdm[["alpha_taxa"]])[[1]] <- 1:nrow(jsdm[["alpha_taxa"]])
+  dimnames(jsdm[["alpha_taxa"]])[[2]] <- colnames(occur.taxa)
+  
+  beta.taxa <- jsdm[["beta_taxa"]]
+  alpha.taxa <- jsdm[["alpha_taxa"]]
+  
+  # Find the 5th and 95th quantile for \alpha_{j}:
+  # > dim(alpha.taxa)
+  # [1] 10000     245
+  a.quantiles <- apply(alpha.taxa, 2, function(a){
+    quantile(a, quantiles)
   })
-  rbindlist(probability)
+  
+  # Find the 5th and 95th quantile for \beta_{jk}:
+  # > dim(beta.taxa)
+  # [1] 10000     7   245
+  b.quantiles <- apply(beta.taxa, c(2,3), function(b){
+    quantile(b, quantiles)
+  })
+  
+  # Transpose matrix of inputs (without ID columns)
+  X <- t(as.matrix(env.cond[, inf.fact]))
+  
+  # Initialize array of dimensions s (samples),i (sites),j ()
+  # For each taxon, compute x_ik*beta_jk
+  m <- array(
+    apply(b.quantiles, 3, function(beta.K){
+      beta.K %*% X
+    }), 
+    dim=c(length(quantiles), nrow(env.cond), dim(beta.taxa)[3])
+  )
+  
+  # Calculate predicted probabilities through the link function
+  # dimensions s, j, i
+  prob <- array(
+    apply(m, 2, function(xb){
+      link.function(a.quantiles + xb)
+    }),
+    dim=c(nrow(a.quantiles), ncol(alpha.taxa), nrow(env.cond))
+    # e.g., dim=c(10000, 245, 580) for full community
+  )
+  
+  dimnames(prob)[[1]] <- quantiles
+  dimnames(prob)[[2]] <- colnames(occur.taxa)
+  dimnames(prob)[[3]] <- samples
+  
+  prob <- melt(prob)
+  
+  # Format the dataset
+  colnames(prob) <- c("Quantile", "Taxon", "SampId", "Pred")
+  prob$Taxon <- as.character(prob$Taxon)
+  prob$SampId <- as.character(prob$SampId)
+  
+  # Not the best solution but it works
+  s <- data.table(SiteId = sites, SampId = samples)
+  prob <- left_join(prob, s, by = "SampId")
+  
+  # Build and join the observations
+  obs <- s %>%
+    cbind(occur.taxa) %>%
+    gather(Taxon, Obs, -SiteId, -SampId) %>%
+    select(-SiteId)
+  prob <- left_join(prob, obs, by=c("SampId", "Taxon"))
+  
+  prob <- prob[, c("SiteId", "SampId", "Taxon", "Pred", "Obs", "Quantile")]
+  
+  setDT(prob)
+  return(prob)
 }
 
 # Extract calibration results for jSDM
@@ -1236,7 +1302,7 @@ extract.beta <- function(results){
 }
 
 # Plot maps ####
-# Plot modelled probabilites across Switzerland given an run.isdm() output
+# Plot modelled probabilites across Switzerland given a run.isdm() output object
 map.isdm <- function(results, fileName) {
   ch <- fortify(inputs$ch)
   
@@ -1272,7 +1338,7 @@ map.isdm <- function(results, fileName) {
     g <- g + theme(plot.title = element_text(hjust = 0.5), plot.subtitle = element_text(hjust = 0.5))
     g <- g + scale_y_continuous(breaks=NULL)
     g <- g + scale_x_continuous(breaks=NULL)
-    g <- g + guides(colour = guide_legend(override.aes = list(size=6)))
+    g <- g + guides(color = guide_legend(override.aes = list(size=6)))
     g <- g + scale_color_manual(name = "Observation", values=c("#FF0000", "#0077FF"), labels=c("Absence", "Presence"))
     g <- g + theme_minimal(base_size = 15)
     g <- g + coord_equal()
@@ -2181,122 +2247,30 @@ map.jsdm.taxon <- function(results, taxon, legend=TRUE){
 # }
 # 
 
-# extract full posterior sample
-# obtain the 5th and 95th quantiles
-# propogate to predict probabilities
-fit.jsdm.pred <- function(result, quantiles=c(0.05, 0.95)){
-  jsdm <- select.jsdm(result)
-  
-  # Extract objects from workspace image to local environment
-  sites <- jsdm$sites
-  samples <- jsdm$samples
-  occur.taxa <- jsdm$occur.taxa
-  env.cond <- jsdm$env.cond
-  inf.fact <- jsdm$inf.fact
-  
-  # Name dimensions of beta^taxa array
-  dimnames(jsdm[["beta_taxa"]])[[1]] <- 1:dim(jsdm[["beta_taxa"]][,,])[1]
-  dimnames(jsdm[["beta_taxa"]])[[2]] <- inf.fact
-  dimnames(jsdm[["beta_taxa"]])[[3]] <- colnames(occur.taxa)
-  
-  # Name dimensions of alpha^taxa array
-  dimnames(jsdm[["alpha_taxa"]])[[1]] <- 1:nrow(jsdm[["alpha_taxa"]])
-  dimnames(jsdm[["alpha_taxa"]])[[2]] <- colnames(occur.taxa)
-  
-  beta.taxa <- jsdm[["beta_taxa"]]
-  alpha.taxa <- jsdm[["alpha_taxa"]]
-  
-  # Find the 5th and 95th quantile for \alpha_{j}:
-  # > dim(alpha.taxa)
-  # [1] 10000     245
-  a.quantiles <- apply(alpha.taxa, 2, function(a){
-    quantile(a, quantiles)
-  })
-  
-  # Find the 5th and 95th quantile for \beta_{jk}:
-  # > dim(beta.taxa)
-  # [1] 10000     7   245
-  b.quantiles <- apply(beta.taxa, c(2,3), function(b){
-    quantile(b, quantiles)
-  })
-  
-  # Transpose matrix of inputs (without ID columns)
-  X <- t(as.matrix(env.cond[, inf.fact]))
-  
-  # Initialize array of dimensions s (samples),i (sites),j ()
-  # For each taxon, compute x_ik*beta_jk
-  m <- array(
-    apply(b.quantiles, 3, function(beta.K){
-      beta.K %*% X
-    }), 
-    dim=c(length(quantiles), nrow(env.cond), dim(beta.taxa)[3])
-  )
-  
-  # Calculate predicted probabilities through the link function
-  # dimensions s, j, i
-  prob <- array(
-    apply(m, 2, function(xb){
-      link.function(a.quantiles + xb)
-    }),
-    dim=c(nrow(a.quantiles), ncol(alpha.taxa), nrow(env.cond))
-    # e.g., dim=c(10000, 245, 580) for full community
-  )
-  
-  dimnames(prob)[[1]] <- quantiles
-  dimnames(prob)[[2]] <- colnames(occur.taxa)
-  dimnames(prob)[[3]] <- samples
-  
-  prob <- melt(prob)
-  
-  # Format the dataset
-  colnames(prob) <- c("Quantile", "Taxon", "SampId", "Pred")
-  prob$Taxon <- as.character(prob$Taxon)
-  prob$SampId <- as.character(prob$SampId)
-  
-  # Not the best solution but it works
-  s <- data.table(SiteId = sites, SampId = samples)
-  prob <- left_join(prob, s, by = "SampId")
-  
-  # Build and join the observations
-  obs <- s %>%
-    cbind(occur.taxa) %>%
-    gather(Taxon, Obs, -SiteId, -SampId) %>%
-    select(-SiteId)
-  prob <- left_join(prob, obs, by=c("SampId", "Taxon"))
-  
-  prob <- prob[, c("SiteId", "SampId", "Taxon", "Pred", "Obs", "Quantile")]
-  
-  setDT(prob)
-  return(prob)
-}
-
-fit.jsdm.pred.taxon <- function(results, taxon, legend=TRUE){
+map.jsdm.pred.taxon <- function(results, taxon, legend=TRUE){
   ch <- fortify(inputs$ch)
   
-  dt <- fit.jsdm.pred(results) # Get predicted probabilities with default quantiles c(0.05, 0.95)
+  dt <- extract.jsdm.pred(results) # Get predicted probabilities with default quantiles c(0.05, 0.95)
   dt <- left_join(dt, inputs$xy, by="SiteId")
   setDT(dt)
   
-  plot.data <- na.omit(dt)
-  plot.data$Obs <- as.factor(plot.data$Obs)
-  
-  
-  plot.data$Alpha <- ifelse(plot.data$Quantile==0.05, 0.65, 0.35)
-  plot.data$Alpha <- as.factor(plot.data$Alpha)
-  plot.data.05 <- plot.data[Quantile==0.05 & Taxon==taxon,]
-  plot.data.95 <- plot.data[Quantile==0.95 & Taxon==taxon,]
+  # Format data for ggplot() aesthetics
+  dt <- na.omit(dt)
+  dt$Obs <- as.factor(dt$Obs)
+  dt$Alpha <- ifelse(dt$Quantile==0.05, 0.65, 0.35)
+  dt$Alpha <- as.factor(dt$Alpha)
+  dt$Shape <- ifelse(dt$Quantile==0.05, 19, 21)
+  dt$Stroke <- ifelse(dt$Quantile==0.05, 0, 0.75)
   
   taxon.label <- sub("_", " ", taxon)
   
+  plot.data <- dt[Taxon==taxon, ]
+  # Map geometries
   g <- ggplot()
   g <- g + geom_polygon(data = ch, aes(x = long, y = lat, group = group), fill=NA, color="black")
-  g <- g + geom_point(data = plot.data.05, aes(X, Y, fill = Obs, size = Pred, alpha = Alpha, color = Obs), stroke = 0)
-  g <- g + geom_point(data = plot.data.95, aes(X, Y, fill = Obs, size = Pred, alpha = Alpha, color = Obs), pch=21)
-  g <- g + scale_radius(limits = c(0,1), breaks =seq(0, 1, 0.2), range = c(2, 6))
+  g <- g + geom_point(data = plot.data, aes(X, Y, size = Pred, alpha = Alpha, color = Obs, stroke = Stroke, shape = Shape))
   
-  # Adjust theme and axes/labels
-  g <- g + scale_y_continuous(breaks = NULL)
-  g <- g + scale_x_continuous(breaks = NULL)
+  # Configure theme and labels
   g <- g + theme_minimal(base_size = 15)
   g <- g + theme(plot.title = element_text(hjust = 0.5),
                  axis.title.x = element_blank(),
@@ -2305,17 +2279,26 @@ fit.jsdm.pred.taxon <- function(results, taxon, legend=TRUE){
                  axis.text.y = element_blank(),
                  plot.margin = unit(c(0.1,0.1,0.1,0.1), "lines"))
   
-  # Adjust legend and colors
-  g <- g + scale_color_manual(name = "Observation", values=c("0" = "#FF0000", "1" = "#0077FF"), labels = c("Absence", "Presence"))
-  g <- g + scale_fill_manual(name = "Observation", values=c("0" = "#FF0000", "1" = "#0077FF"), labels = c("Absence", "Presence"))
-  g <- g + scale_alpha_manual(name = "Posterior\nquantile", values=c("0.65"="0.65", "0.35"="0.35"), labels=c("5th percentile", "95th percentile"))
-  g <- g + guides(fill = guide_legend(override.aes = list(size=6)),
-                  alpha = guide_legend(override.aes = list(size=6, stroke=0)))
   g <- g + labs(title = taxon.label,
+                x = "",
+                y = "",
                 size = "Probability of\noccurrence",
-                alpha = "Posterior\nquantile")
+                alpha = expression(paste("Posterior ", beta["jk"])),
+                color = "Observation")
+  
+  # Configure legends and scales
+  g <- g + guides(size = guide_legend(override.aes = list(color="black", stroke=0)),
+                  color = guide_legend(override.aes = list(size=6, stroke=0)),
+                  alpha = guide_legend(override.aes = list(size=6, shape=c(19,21), stroke=c(0,0.75), color="black")))
+  g <- g + scale_y_continuous(breaks=NULL)
+  g <- g + scale_x_continuous(breaks=NULL)
+  g <- g + scale_radius(limits = c(0,1), breaks = seq(0, 1, 0.2), range = c(2, 6))
+  g <- g + scale_color_manual(values=c("0" = "#FF0000", "1" = "#0077FF"), labels=c("Absence", "Presence"))
+  g <- g + scale_alpha_manual(values=c("0.65"="0.65", "0.35"="0.35"), labels=c("5th quantile", "95th quantile"))
+  g <- g + scale_shape_identity()
+  cat("Constructing ggplot for:", taxon, "\n")
   if (!legend){
-    g <- g + guides(fill=FALSE, size=FALSE, alpha=FALSE, color=FALSE)
+    g <- g + guides(size=FALSE, alpha=FALSE, color=FALSE)
   }
   return(g)
 }
