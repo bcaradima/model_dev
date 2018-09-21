@@ -11,7 +11,7 @@ source('scripts/functions.R')
 # Install and load packages
 # Tidyverse packages and data.table for data processing, mgcv (GAMs), rgdal (spatial data), doParallel (parallel computing), rstan and coda for Bayesian inference, crayon for colored console outputs (helpful but unnecessary), scales/e1071/MASS/quantreg for miscallaneous functions
 # Plotting libraries: data.tree, networkD3, ggridges, ggpubr
-ipak(c("tidyverse", "data.table", "car", "psych", "doParallel", "coda", "rstan", "scales", "e1071", "MASS", "crayon", "rgdal", "networkD3", "data.tree", "plotly", "ggridges", "ggpubr")) # "mgcv", "quantreg"
+ipak(c("tidyverse", "data.table", "car", "psych", "doParallel", "coda", "rstan", "scales", "e1071", "MASS", "crayon", "rgdal", "networkD3", "sf", "data.tree", "plotly", "ggridges", "ggpubr", "cowplot", "svglite")) # "mgcv", "quantreg"
 
 options(stringsAsFactors = FALSE)
 options(scipen=999)
@@ -32,8 +32,8 @@ inv <- read.csv('inputs/invertebrates_2017-04-20.dat', sep='\t', header=TRUE, na
 inputs$taxonomy <- read.csv('inputs/invertebrates_taxonomy_2018-02-23.dat', sep='\t', header=TRUE, stringsAsFactors=FALSE, na.strings=c(""," ","NA"))
 
 # Coordinates for sites and borders of Switzerland
-inputs$ch <- readOGR("./inputs", "switzerland", stringsAsFactors = F)
-# inputs$ch <- read.csv('inputs/Swiss_border_coordinates.dat', sep='\t', header=TRUE, stringsAsFactors = FALSE)
+inputs$ch <- st_read("./inputs","switzerland", stringsAsFactors = F)
+inputs$ch <- filter(inputs$ch, NAME=="Schweiz")
 inputs$xy <- select(inv, SiteId, X, Y)
 inputs$xy <- distinct(inputs$xy)
 
@@ -93,4 +93,4 @@ b$urban <- fread("inputs/catchment_buffer/Urban_All_Buffer_Catch.csv", sep=';', 
 b$arable <- fread("inputs/catchment_buffer/Arable_All_Buffer_Catch.csv", sep=';', header=TRUE, na.strings=c("<Null>", "NA", ""), stringsAsFactors=FALSE)
 
 # Optional: run inputs.R script to prepare the inputs
-source('scripts/inputs.R')
+# source('scripts/inputs.R')

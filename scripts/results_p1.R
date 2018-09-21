@@ -1,5 +1,53 @@
 ### RESULTS: Paper 1 ####
+# Select potential explanatory variables
+K <- c("A10m", "A100m", "A1km", "A.EDO", "IAR", "TU.Dm", "TU.Cr", "LUD", "Urban", "UI", "F10m", "F100m", "F1km", "F.EDO","Forest", "FRI", "Temp", "FV", "WV", "BM", "Morph", "WW", "HP", "Temp2")
+
+predictors <- prepare.inputs(K, sample.bdms, center = TRUE)
+
+cor.plot(select(predictors, -SiteId, -SampId), numbers=TRUE)
+write.csv(predictors, 'outputs/predictors.csv', row.names=FALSE)
+
+
+predictors.trans <- prepare.inputs(K, sample.bdms, center = FALSE)
+
+predictors.trans <- mutate(predictors.trans, 
+                     A10m=log10(A10m+1),
+                     A100m=log10(A100m+1),
+                     A1km=log10(A1km+1),
+                     A.EDO=log10(A.EDO+1),
+                     IAR=log10(IAR+1),
+                     TU.Dm=log10(TU.Dm+1),
+                     TU.Cr=log10(TU.Cr+1),
+                     LUD=log10(LUD+1),
+                     Urban=log10(Urban+1),
+                     UI=log10(UI+1),
+                     FRI=log10(FRI+1)
+                     )
+
+predictors.trans <- rename(predictors.trans,
+                           "log10.A10m" = "A10m",
+                           "log10.A100m" = "A100m",
+                           "log10.A1km" = "A1km",
+                           "log10.A.EDO" = "A.EDO",
+                           "log10.IAR" = "IAR",
+                           "log10.TU.Dm" = "TU.Dm",
+                           "log10.TU.Cr" = "TU.Cr",
+                           "log10.LUD" = "LUD",
+                           "log10.Urban" = "Urban",
+                           "log10.UI" = "UI",
+                           "log10.FRI" = "FRI"
+                           )
+
+write.csv(predictors.trans, 'outputs/predictors_transformed.csv', row.names=FALSE)
+
+# Transformations ####
 # Description: this script prepares the results for paper 1. It processes the joint model workspaces and combines the results with those of the individual models before producing various plots.
+# deploy.jsdm() ####
+# K <- c("Temp", "Temp2", "FV", "F10m", "IAR", "Urban", "LUD")
+deploy.jsdm(K, sample.bdms, "bdms", center=T, cv=0)
+deploy.jsdm(K, sample.bdms, "bdms_train1", center=T, cv=1)
+deploy.jsdm(K, sample.bdms, "bdms_train2", center=T, cv=2)
+deploy.jsdm(K, sample.bdms, "bdms_train3", center=T, cv=3)
 
 # Calibration results ####
 # Results: paper 1 BDM species
@@ -397,14 +445,13 @@ map.jsdm(jsdm.p1, 'P1 - maps jSDM')
 plot.prob(isdm.p1, 'P1 - prob vs inputs iSDM')
 plot.prob(jsdm.p1, 'P1 - prob vs inputs jSDM')
 
-# Plot map.jsdm.pred.taxon() examples####
+# Plot map.jsdm.pred.taxon() examples ####
 # Grid arrange prob.taxon and map.taxon plots
 g1 <- plot.prob.taxon(jsdm.p1, "Gammaridae", legend=FALSE)
 g2 <- map.jsdm.taxon(jsdm.p1, "Gammaridae", legend=FALSE)
 g3 <- map.jsdm.taxon(jsdm.p1, "Nemoura_minima", legend=FALSE)
 g4 <- map.jsdm.taxon(jsdm.p1, "Protonemura_lateralis", legend=FALSE)
 
-library(cowplot)
 plot_grid(g1,g2,g3,g4, labels=c("(a)", "(b)", "(c)", "(d)"), align="hv")
 
 # Grid arrange prob.taxon and map.taxon plots
@@ -420,7 +467,6 @@ dev.off()
 # pdf('P1 - map jSDM [Gammaridae].pdf', width=13, height=9.5)
 g <- map.jsdm.pred.taxon(jsdm.p1, "Gammaridae", legend=TRUE)
 # SVG produced to transfer legend to grid-arrange plot above.
-# requires library(svglite)
 ggsave(file="P1 - map jSDM [Gammaridae].svg", plot=g, width=13, height=9.50)
 
 # dev.off()
@@ -515,7 +561,7 @@ print(g)
 dev.off()
 
 # Plot P1 - predictive uncertainty ####
-pred <- pred.jsdm("bdms")
+pred <- cv.jsdm.pred("bdms")
 gc()
 
 # what about binding the probabilities manually?
@@ -565,7 +611,7 @@ dev.off()
 # Plot P1 - map predictive uncertainty ####
 ch <- fortify(inputs$ch)
 
-dt <- extract.jsdm.pred(jsdm.p1) # Get predicted probabilities with default quantiles c(0.05, 0.95)
+dt <- extract.jsdm.pred(jsdm.p1, get.quantiles=TRUE) # Get predicted probabilities with default quantiles c(0.05, 0.95)
 dt <- left_join(dt, inputs$xy, by="SiteId")
 setDT(dt)
 
@@ -596,20 +642,20 @@ for (j in 1:length(taxa)){
                 x = "",
                 y = "",
                 size = "Probability of\noccurrence",
-                alpha = expression(paste("Posterior ", beta["jk"])),
+                alpha = "Posterior",
                 color = "Observation")
   g <- g + theme_minimal(base_size = 15)
   g <- g + theme(plot.title = element_text(hjust = 0.5), plot.subtitle = element_text(hjust = 0.5))
   
   # Configure legends and scales
-  g <- g + guides(size = guide_legend(override.aes = list(color="black", stroke=0)),
-                  color = guide_legend(override.aes = list(size=6, stroke=0)),
-                  alpha = guide_legend(override.aes = list(size=6, shape=c(19,21), stroke=c(0,0.75), color="black")))
+  g <- g + guides(size = guide_legend(override.aes = list(color="black", stroke=0), order=1),
+                  alpha = guide_legend(override.aes = list(size=6, shape=c(19,21), stroke=c(0,0.75), color="black"), order=2),
+                  color = guide_legend(override.aes = list(size=6, stroke=0), order=3))
   g <- g + scale_y_continuous(breaks=NULL)
   g <- g + scale_x_continuous(breaks=NULL)
   g <- g + scale_radius(limits = c(0,1), breaks = seq(0, 1, 0.2), range = c(2, 6))
   g <- g + scale_color_manual(values=c("0" = "#FF0000", "1" = "#0077FF"), labels=c("Absence", "Presence"))
-  g <- g + scale_alpha_manual(values=c("0.65"="0.65", "0.35"="0.35"), labels=c("95th quantile", "5th quantile"))
+  g <- g + scale_alpha_manual(values=c("0.65"="0.65", "0.35"="0.35"), labels=c("5th quantile", "95th quantile"))
   g <- g + scale_shape_identity()
 
   cat("Plotting taxon: ", taxon, "\n")

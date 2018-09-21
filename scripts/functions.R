@@ -65,8 +65,8 @@ labeller <- function(inf.fact){
               "FRI" = expression(paste("FRI (%)")),
               "bFRI" = expression(paste("bFRI (%)")),
               
-              "IAR" = expression(paste("IAR (w"["c"],"*","f"["c"],")")),
-              # expression(paste("IAR (treatments * ","f"["c"],")"))
+              "IAR" = expression(paste("IAR (w"["c"]%*%"f"["c"],")")),
+              "WV" = expression(paste("WV")),
               "Urban" = expression(paste("Urban (%)")),
               "LUD" = expression(paste("LUD (CE/km"^2,")"))
               
@@ -191,7 +191,7 @@ paste5 <- function(..., sep = " ", collapse = NULL, na.rm = F) {
 # Run models ####
 # prepare.inputs performs selection and transformation to prepare the influence factors 
 # in a model, where [K] is a character vector of influence factors, [y] is the invertebrate data,
-# center is a Boolean indicating whether the mean should be subtracted at each site
+# [center] is a Boolean indicating whether the mean should be subtracted at each site
 prepare.inputs <- function(K, y, center){
   # Get sites/samples of observation data
   site.samples <- select(y, SiteId, SampId)
@@ -212,7 +212,10 @@ prepare.inputs <- function(K, y, center){
   if ("Temp" %in% K & !("Temp2" %in% colnames(dt))){
     dt$Temp2 <- dt$Temp^2
   }
-  
+  # If temperature is an input, add a quadratic transformation
+  if ("FV" %in% K & !("FV2" %in% colnames(dt))){
+    dt$FV2 <- dt$FV^2
+  }
   # Print number of NAs
   for (k in seq_along(K)){
     variable <- K[k]
@@ -270,7 +273,7 @@ deploy.jsdm <- function(K, y, trial, center, cv){
 }
 
 
-# Define iSDM likelihood to optimize
+# Calculate GLM likelihood given model inputs, observations, and parameters
 likelihood <- function(par, env.cond, y){
   z <- par[1] + env.cond %*% par[-1]
   p <- 1/(1+exp(-z))
@@ -484,7 +487,7 @@ cv.jsdm <- function(trials) {
     trial <- trials[t]
     for (k in 1:3){
       model.image <- new.env()
-      path <- paste('outputs/jsdm_p1/jsdm_',trial,'_train', k, sep="")
+      path <- paste('outputs/jsdm_p2/full model/jsdm_',trial,'_train', k, sep="")
       load(paste(path, "/Inv_JSDM_D1.RData", sep = ""), envir = model.image)
       
       # Extract objects from workspace image to local environment
@@ -812,10 +815,11 @@ cv.jsdm.pred <- function(trials){
 }
 
 # Process models ####
-# Return tidy, complete variable selection results (no statistics are calculated)
-extract.vse <- function(trial, sample){
+# Return tidy, complete Variable Selection Results (VSR; no summary statistics are calculated)
+extract.vsr <- function(trial, sample){
   image <- new.env()
-  load(paste('outputs/variable_selection/variable_selection_', trial, '/variable_selection.RData',sep=''), envir = image)
+  
+  load(paste('outputs/', trial, '/variable_selection.RData',sep=''), envir = image)
   output <- image$output
   n <- occur.freq(sample)
   rm(image)
@@ -843,12 +847,15 @@ extract.vse <- function(trial, sample){
     # Bind the datasets by row into one
     d <- bind_rows(d, x$fold1, x$fold2, x$fold3)
   }
+  n <- occur.freq(sample)
   d$n <- n[d$Taxon]
   return(d)
 }
 
-
-extract.jsdm.pred <- function(result, quantiles=c(0.05, 0.95)){
+# Propogate quantiles of a subsample of the posterior through the jSDM
+# to obtain predicted probabilites based on 5th and 95th quantiles (default arguments)
+# Warning: this function consumes large quantities of memory
+propogate.jsdm.pred <- function(result, get.quantiles=TRUE, quantiles=c(0.05, 0.95)){
   jsdm <- select.jsdm(result)
   
   # Extract objects from workspace image to local environment
@@ -870,76 +877,84 @@ extract.jsdm.pred <- function(result, quantiles=c(0.05, 0.95)){
   beta.taxa <- jsdm[["beta_taxa"]]
   alpha.taxa <- jsdm[["alpha_taxa"]]
   
-  # Find the 5th and 95th quantile for \alpha_{j}:
-  # > dim(alpha.taxa)
-  # [1] 10000     245
-  a.quantiles <- apply(alpha.taxa, 2, function(a){
-    quantile(a, quantiles)
-  })
+  # Propogate a subsample of the full posterior through the model to obtain predicted probabilities,
+  # THEN obtain the 5th and 95th quantiles of the predicted probabilities
+  posterior.samples <- 1:nrow(alpha.taxa)
+  subsample.size <- length(posterior.samples)*0.2
   
-  # Find the 5th and 95th quantile for \beta_{jk}:
-  # > dim(beta.taxa)
-  # [1] 10000     7   245
-  b.quantiles <- apply(beta.taxa, c(2,3), function(b){
-    quantile(b, quantiles)
-  })
+  set.seed(2352)# ensure a reproducible random sample
+  subsample <- sample(posterior.samples, subsample.size, replace=FALSE)
   
+  alpha.taxa.subsample <- alpha.taxa[subsample, ]
+  beta.taxa.subsample <- beta.taxa[subsample, ,]
+
   # Transpose matrix of inputs (without ID columns)
   X <- t(as.matrix(env.cond[, inf.fact]))
   
   # Initialize array of dimensions s (samples),i (sites),j ()
   # For each taxon, compute x_ik*beta_jk
   m <- array(
-    apply(b.quantiles, 3, function(beta.K){
+    apply(beta.taxa.subsample, 3, function(beta.K){
       beta.K %*% X
     }), 
-    dim=c(length(quantiles), nrow(env.cond), dim(beta.taxa)[3])
+    dim=c(subsample.size, nrow(env.cond), dim(beta.taxa.subsample)[3])
+    # e.g., dim=c(10000, 580, 245) for full community
   )
   
   # Calculate predicted probabilities through the link function
   # dimensions s, j, i
   prob <- array(
     apply(m, 2, function(xb){
-      link.function(a.quantiles + xb)
+      link.function(alpha.taxa.subsample + xb)
     }),
-    dim=c(nrow(a.quantiles), ncol(alpha.taxa), nrow(env.cond))
+    dim=c(subsample.size, ncol(alpha.taxa.subsample), nrow(env.cond))
     # e.g., dim=c(10000, 245, 580) for full community
   )
+  rm(m); gc()
   
-  dimnames(prob)[[1]] <- quantiles
+  dimnames(prob)[[1]] <- subsample
   dimnames(prob)[[2]] <- colnames(occur.taxa)
   dimnames(prob)[[3]] <- samples
   
   prob <- melt(prob)
   
   # Format the dataset
-  colnames(prob) <- c("Quantile", "Taxon", "SampId", "Pred")
+  colnames(prob) <- c("Subsample", "Taxon", "SampId", "Pred")
   prob$Taxon <- as.character(prob$Taxon)
   prob$SampId <- as.character(prob$SampId)
   
-  # Not the best solution but it works
+  # Add the SiteId to SampId (not the best solution but it works)
   s <- data.table(SiteId = sites, SampId = samples)
-  prob <- left_join(prob, s, by = "SampId")
   
   # Build and join the observations
   obs <- s %>%
     cbind(occur.taxa) %>%
     gather(Taxon, Obs, -SiteId, -SampId) %>%
     select(-SiteId)
-  prob <- left_join(prob, obs, by=c("SampId", "Taxon"))
   
-  prob <- prob[, c("SiteId", "SampId", "Taxon", "Pred", "Obs", "Quantile")]
-  
-  setDT(prob)
+  if(get.quantiles){
+    prob <- prob %>%
+      group_by(SampId, Taxon) %>%
+      summarise(quantile.05 = quantile(Pred, 0.05), 
+                quantile.95 = quantile(Pred, 0.95)) %>%
+      gather(Quantile, Pred, quantile.05:quantile.95, -SampId) %>%
+      mutate(Quantile=ifelse(Quantile=="quantile.05", 0.05, 0.95)) %>%
+      left_join(obs, by=c("SampId", "Taxon")) %>%
+      left_join(s, by="SampId")
+  } else{
+    prob <- prob %>%
+      left_join(obs, by=c("SampId", "Taxon")) %>%
+      left_join(s, by="SampId")
+  }
   return(prob)
 }
 
-# Extract calibration results for jSDM
+# Extract results from calibrated jSDM
 extract.jsdm <- function(dir, trials, epsilon) {
   if (missing(epsilon)){
     epsilon <- FALSE
   }
-  # Create a local environment for loading model workspace images
+  # Create a local environment for loading workspace image
   model.image <- new.env()
   
   # Store multiple model data results
@@ -1304,8 +1319,6 @@ extract.beta <- function(results){
 # Plot maps ####
 # Plot modelled probabilites across Switzerland given a run.isdm() output object
 map.isdm <- function(results, fileName) {
-  ch <- fortify(inputs$ch)
-  
   pdf(paste(fileName, ".pdf", sep=''), paper = 'special', width = 10.5, onefile = TRUE)
   taxa <- results$taxa
   for (j in 1:length(taxa)){
@@ -1313,8 +1326,8 @@ map.isdm <- function(results, fileName) {
     taxon <- names(taxa)[j]
     
     m <- select.isdm(results, taxon)
-    d <- D2(m)
-    d <- round(d, 2)
+    dj <- D2(m)
+    dj <- round(d, 2)
     fv <- m$fitted.values
     
     # Tidy the DF for plotting
@@ -1326,22 +1339,24 @@ map.isdm <- function(results, fileName) {
     dt$Obs <- as.factor(dt$Obs)
     
     g <- ggplot()
-    g <- g + geom_polygon(data = ch, aes(x = long, y = lat, group = group), fill=NA, color="black")
+    g <- g + geom_sf(data = inputs$ch, fill=NA, color="black")
     g <- g + geom_point(data = dt, aes(X, Y, color = Obs, size = Pred), alpha = 0.35)
     # g <- g + scale_size_continuous(limits = c(0,1), breaks = seq(0, 1, 0.2), range = c(2, 7))
     g <- g + scale_radius(limits = c(0,1), breaks =seq(0, 1, 0.2), range = c(2, 6))
     g <- g + labs(title = paste("Probability of occurrence vs observations of",paste(taxon)),
-                  subtitle = paste("iSDM: y ~", paste(results$inf.fact, collapse = "+", sep = " "), "- page", j, "\nD2 = ", d),
+                  subtitle = paste("iSDM: y ~", paste(results$inf.fact, collapse=" ", sep = " "), "- page", j, "\nD2 = ", dj),
                   x = "",
                   y = "",
                   size = "Probability of\noccurrence")
-    g <- g + theme(plot.title = element_text(hjust = 0.5), plot.subtitle = element_text(hjust = 0.5))
+    g <- g + theme_minimal(base_size = 15)
+    g <- g + theme(plot.title = element_text(), 
+                   plot.subtitle = element_text(),
+                   panel.grid.major=element_line(colour="transparent"),
+                   axis.text = element_blank())
     g <- g + scale_y_continuous(breaks=NULL)
     g <- g + scale_x_continuous(breaks=NULL)
     g <- g + guides(color = guide_legend(override.aes = list(size=6)))
     g <- g + scale_color_manual(name = "Observation", values=c("#FF0000", "#0077FF"), labels=c("Absence", "Presence"))
-    g <- g + theme_minimal(base_size = 15)
-    g <- g + coord_equal()
     cat("Plotting taxon: ", taxon, "\n")
     print(g)
     rm(d, fv, m)
@@ -1352,7 +1367,6 @@ map.isdm <- function(results, fileName) {
 # Plot modelled probabilites across Switzerland given an extact.jsdm() output
 map.jsdm <- function(results, fileName){
   jsdm <- select.jsdm(results)
-  ch <- fortify(inputs$ch)
   
   # Get probability/observations, deviance, and occurrence frequency for all taxa
   probability <- left_join(results$probability, inputs$xy, by="SiteId")
@@ -1374,21 +1388,24 @@ map.jsdm <- function(results, fileName){
     dt$Obs <- as.factor(dt$Obs)
     
     g <- ggplot()
-    g <- g + geom_polygon(data = ch, aes(x = long, y = lat, group = group), fill=NA, color="black")
+    g <- g + geom_sf(data = inputs$ch, fill=NA, color="black")
     g <- g + geom_point(data = dt, aes(X, Y, color = Obs, size = Pred), alpha = 0.35)
     # g <- g + scale_size_continuous(limits = c(0,1), breaks = seq(0, 1, 0.2), range = c(2, 7))
     g <- g + scale_radius(limits = c(0,1), breaks =seq(0, 1, 0.2), range = c(2, 6))
     g <- g + labs(title = paste("Probability of occurrence vs observations of",paste(taxon)),
-                  subtitle = paste("jSDM: y ~", paste(jsdm$inf.fact, collapse = "+", sep = " "), "- page", j, "\nD2 = ", dj),
+                  subtitle = paste("jSDM: y ~", paste(jsdm$inf.fact, collapse=" ", sep = " "), "- page", j, "\nD2 = ", dj),
                   x = "",
                   y = "")
-    g <- g + theme(plot.title = element_text(hjust = 0.5), plot.subtitle = element_text(hjust = 0.5))
+    g <- g + theme_minimal(base_size = 15)
+    g <- g + theme(plot.title = element_text(), 
+                   plot.subtitle = element_text(),
+                   panel.grid.major = element_line(colour="transparent"),
+                   axis.text = element_blank())
     g <- g + scale_y_continuous(breaks=NULL)
     g <- g + scale_x_continuous(breaks=NULL)
     g <- g + guides(colour = guide_legend(override.aes = list(size=6)))
     g <- g + labs(size = "Probability of\noccurrence")
     g <- g + scale_color_manual(name = "Observation", values=c("0" = "#FF0000", "1" = "#0077FF"), labels=c("Absence", "Presence"))
-    g <- g + theme_minimal(base_size = 15)
     cat("Plotting taxon: ", taxon, "\n")
     print(g)
   }
@@ -1397,7 +1414,6 @@ map.jsdm <- function(results, fileName){
 
 map.jsdm.taxon <- function(results, taxon, legend=TRUE){
   jsdm <- select.jsdm(results)
-  ch <- fortify(inputs$ch)
   
   # Get probability/observations, deviance, and occurrence frequency for all taxa
   probability <- left_join(results$probability, inputs$xy, by="SiteId")
@@ -1410,7 +1426,7 @@ map.jsdm.taxon <- function(results, taxon, legend=TRUE){
   taxon.label <- sub("_", " ", taxon)
   
   g <- ggplot()
-  g <- g + geom_polygon(data = ch, aes(x = long, y = lat, group = group), fill=NA, color="black")
+  g <- g + geom_sf(data = inputs$ch, fill=NA, color="black")
   g <- g + geom_point(data = dt, aes(X, Y, color = Obs, size = Pred), alpha = 0.35)
   g <- g + scale_radius(limits = c(0,1), breaks =seq(0, 1, 0.2), range = c(2, 6))
   
@@ -1419,10 +1435,9 @@ map.jsdm.taxon <- function(results, taxon, legend=TRUE){
   g <- g + scale_x_continuous(breaks = NULL)
   g <- g + theme_minimal(base_size = 15)
   g <- g + theme(plot.title = element_text(hjust = 0.5),
-                 axis.title.x = element_blank(),
-                 axis.title.y = element_blank(),
-                 axis.text.x = element_blank(),
-                 axis.text.y = element_blank(),
+                 axis.title = element_blank(),
+                 axis.text = element_blank,
+                 panel.grid.major = element_line(colour="transparent"),
                  plot.margin = unit(c(0.1,0.1,0.1,0.1), "lines"))
   
   # Adjust legend and colors
@@ -1436,6 +1451,67 @@ map.jsdm.taxon <- function(results, taxon, legend=TRUE){
   return(g)
 }
 
+map.jsdm.pred <- function(results, fileName){
+  cat("Propogating posterior quantiles through joint model...\n")
+  dt <- extract.jsdm.pred(results, get.quantiles=TRUE) # Get predicted probabilities with default quantiles c(0.05, 0.95)
+  dt <- left_join(dt, inputs$xy, by="SiteId")
+  setDT(dt)
+  
+  # Format data for ggplot() aesthetics
+  dt <- na.omit(dt)
+  dt$Obs <- as.factor(dt$Obs)
+  dt$Alpha <- ifelse(dt$Quantile==0.05, 0.65, 0.35)
+  dt$Alpha <- as.factor(dt$Alpha)
+  dt$Shape <- ifelse(dt$Quantile==0.05, 19, 21)
+  dt$Stroke <- ifelse(dt$Quantile==0.05, 0, 0.75)
+  
+  # Get specific taxa and exp. variables
+  jsdm <- select.jsdm(results)
+  taxa <- occur.freq(jsdm$occur.taxa)
+  inf.fact <- jsdm$inf.fact
+  
+  pdf(paste(fileName, ".pdf", sep=''), paper = 'special', width = 10.5, onefile = TRUE)
+  
+  # Loop through taxa, subset data by taxon and plot
+  for (j in 1:length(taxa)){
+    taxon <- names(taxa[j])
+    
+    plot.data <- dt[Taxon==taxon, ]
+    
+    # Map geometries
+    g <- ggplot()
+    g <- g + geom_sf(data = inputs$ch, fill=NA, color="black")
+    g <- g + geom_point(data = plot.data, aes(X, Y, size = Pred, alpha = Alpha, color = Obs, stroke = Stroke, shape = Shape))
+    
+    # Configure themes and labels
+    g <- g + labs(title = paste("Probability of occurrence vs observations of", taxon),
+                  subtitle = paste("jSDM:", paste(inf.fact, collapse = " ", sep = " "), "- page", j),
+                  x = "",
+                  y = "",
+                  size = "Probability of\noccurrence",
+                  alpha = "Posterior",
+                  color = "Observation")
+    g <- g + theme_minimal(base_size = 15)
+    g <- g + theme(plot.title = element_text(hjust = 0.5), 
+                   plot.subtitle = element_text(hjust = 0.5),
+                   panel.grid.major = element_line(colour="transparent"))
+    
+    # Configure legends and scales
+    g <- g + guides(size = guide_legend(override.aes = list(color="black", stroke=0), order=1),
+                    alpha = guide_legend(override.aes = list(size=6, shape=c(19,21), stroke=c(0,0.75), color="black"), order=2),
+                    color = guide_legend(override.aes = list(size=6, stroke=0), order=3))
+    g <- g + scale_y_continuous(breaks=NULL)
+    g <- g + scale_x_continuous(breaks=NULL)
+    g <- g + scale_radius(limits = c(0,1), breaks = seq(0, 1, 0.2), range = c(2, 6))
+    g <- g + scale_color_manual(values=c("0" = "#FF0000", "1" = "#0077FF"), labels=c("Absence", "Presence"))
+    g <- g + scale_alpha_manual(values=c("0.65"="0.65", "0.35"="0.35"), labels=c("5th quantile", "95th quantile"))
+    g <- g + scale_shape_identity() # Plot the shape according to the data
+    
+    cat("Plotting taxon: ", taxon, "\n")
+    print(g)
+  }
+  dev.off()
+}
 # # Beginning with a full model, drop one variable at a time (OVAT) and measure
 # # the change in D-squared
 # VarImp <- function(cm, predictors){
@@ -2248,9 +2324,8 @@ map.jsdm.taxon <- function(results, taxon, legend=TRUE){
 # 
 
 map.jsdm.pred.taxon <- function(results, taxon, legend=TRUE){
-  ch <- fortify(inputs$ch)
-  
-  dt <- extract.jsdm.pred(results) # Get predicted probabilities with default quantiles c(0.05, 0.95)
+  # Get predicted probabilities with default quantiles c(0.05, 0.95)
+  dt <- propogate.jsdm.pred(results, get.quantiles = TRUE) 
   dt <- left_join(dt, inputs$xy, by="SiteId")
   setDT(dt)
   
@@ -2267,7 +2342,7 @@ map.jsdm.pred.taxon <- function(results, taxon, legend=TRUE){
   plot.data <- dt[Taxon==taxon, ]
   # Map geometries
   g <- ggplot()
-  g <- g + geom_polygon(data = ch, aes(x = long, y = lat, group = group), fill=NA, color="black")
+  g <- g + geom_sf(data = inputs$ch, fill=NA, color="black")
   g <- g + geom_point(data = plot.data, aes(X, Y, size = Pred, alpha = Alpha, color = Obs, stroke = Stroke, shape = Shape))
   
   # Configure theme and labels
@@ -2277,19 +2352,20 @@ map.jsdm.pred.taxon <- function(results, taxon, legend=TRUE){
                  axis.title.y = element_blank(),
                  axis.text.x = element_blank(),
                  axis.text.y = element_blank(),
+                 panel.grid.major = element_line(colour="transparent"),
                  plot.margin = unit(c(0.1,0.1,0.1,0.1), "lines"))
   
   g <- g + labs(title = taxon.label,
                 x = "",
                 y = "",
                 size = "Probability of\noccurrence",
-                alpha = expression(paste("Posterior ", beta["jk"])),
+                alpha = "Posterior",
                 color = "Observation")
   
   # Configure legends and scales
-  g <- g + guides(size = guide_legend(override.aes = list(color="black", stroke=0)),
-                  color = guide_legend(override.aes = list(size=6, stroke=0)),
-                  alpha = guide_legend(override.aes = list(size=6, shape=c(19,21), stroke=c(0,0.75), color="black")))
+  g <- g + guides(size = guide_legend(override.aes = list(color="black", stroke=0), order=1),
+                  alpha = guide_legend(override.aes = list(size=6, shape=c(19,21), stroke=c(0,0.75), color="black"), order=2),
+                  color = guide_legend(override.aes = list(size=6, stroke=0), order=3))
   g <- g + scale_y_continuous(breaks=NULL)
   g <- g + scale_x_continuous(breaks=NULL)
   g <- g + scale_radius(limits = c(0,1), breaks = seq(0, 1, 0.2), range = c(2, 6))
@@ -2323,12 +2399,14 @@ map.inputs <- function(x, fileName) {
       k.max <- round(max(plot.data[["Value"]], na.rm = T), 1)
       k.int <- (k.max - k.min)/5 # ; if.int <- round(if.int)
       
-      g <- ggplot(inputs$ch, aes(POINT_X, POINT_Y))
-      g <- g + geom_path(lineend = "round")
+      g <- ggplot()
+      g <- g + geom_sf(data = inputs$ch, fill=NA, color="black")
       g <- g + geom_point(data = plot.data, aes(X, Y, size = Value), alpha = 0.35)
-      g <- g + scale_size_continuous(name = variable, limits = c(k.min, k.max), breaks = seq(k.min, k.max, k.int), range = c(2, 7))
+      # g <- g + scale_size_continuous(name = variable, limits = c(k.min, k.max), breaks = seq(k.min, k.max, k.int), range = c(2, 7))
+      g <- g + scale_radius(name = variable, limits = c(k.min, k.max), breaks = seq(k.min, k.max, k.int), range = c(2, 7))
       g <- g + scale_colour_brewer(palette = "Set1")
       
+      g <- g + theme(panel.grid.major = element_line(colour="transparent"))
       # Plot titles and labels
       g <- g + scale_y_continuous(breaks=NULL)
       g <- g + scale_x_continuous(breaks=NULL)
@@ -2515,11 +2593,13 @@ plot.prob <- function(results, filename){
     g <- g + geom_point(alpha = 0.25)
     g <- g + theme_bw(base_size=15)
     g <- g + facet_wrap(~ Label, scales = "free_x", labeller=label_parsed, strip.position="bottom")
-    g <- g + labs(title = paste("Probability of occurrence vs explanatory variables for",paste(taxon)),
+    g <- g + labs(title = paste("Probability of occurrence (based on the maximum marginal posterior distribution of the taxon-specific parameter) vs explanatory variables for",paste(taxon)),
                   x = "Explanatory variable",
                   y = "Probability of occurrence",
                   color = "Observation")
-    g <- g + theme(strip.background = element_blank(), strip.placement = "outside")
+    g <- g + theme(strip.background = element_blank(), 
+                   strip.placement = "outside",
+                   plot.title = element_text(size=10))
     g <- g + scale_color_manual(name = "Observation", values=c("#FF0000", "#0077FF"), labels=c("Absence", "Presence"))
     g <- g + guides(colour = guide_legend(override.aes = list(size=6)))
     cat("Plotting taxon: ", taxon, "\n")

@@ -1,62 +1,39 @@
-# vs <- "variable_selection/variable_selection_bdms"
-vs <- "vs_test/vs_invfp"
-r <- 102 # 56, 180, 102 for BDMs/BDMf, Invf, Invf_plateau
-
-### PROCESS RESULTS ####
-image <- new.env()
-load(paste('outputs', vs, 'variable_selection.RData',sep='/'), envir = image)
-output <- image$output
-n.data <- image$n
-rm(image)
-
-# Tidy data for plots ####
-# Get the mean relative deviance over k-folds, for all parameters, all taxa, all models
-d <- data.table()
-for (i in 1:length(output)){
-  x <- output[[i]]
-  
-  # Each fold contains the same models run against each taxa in the fold;
-  # repeat the models as many times as the number of taxa in each fold
-  m <- apply(x$models.to.run, 1, function(m){
-    paste(m, collapse = " ")
-  })
-  
-  # Fill the Model column for each fold
-  x$fold1$Model <- rep(m, nrow(x$fold1)/nrow(x$models.to.run))
-  x$fold2$Model <- rep(m, nrow(x$fold2)/nrow(x$models.to.run))
-  x$fold3$Model <- rep(m, nrow(x$fold3)/nrow(x$models.to.run))
-  
-  x$fold1$Fold <- 1
-  x$fold2$Fold <- 2
-  x$fold3$Fold <- 3
-  
-  # Bind the datasets by row into one
-  p.dev <- bind_rows(x$fold1, x$fold2, x$fold3)
-  
-  # Calculate the mean deviance for each taxon and model over the k-folds
-  mean.dev <- p.dev %>%
-    # rename(Taxon = taxon) %>%
-    mutate(Parameters = x$n.parameters)
-    # group_by(Taxon, Model) %>%
-    # summarise(mrd.train = mean(rdev.train, na.rm=TRUE), mrd.test = mean(rdev.test, na.rm=TRUE), Parameters = mean(Parameters)) %>%
-    # ungroup()
-
-  d <- bind_rows(d, mean.dev)
-}
-d$n <- n.data[d$Taxon]
+# r <- 56 # 56, 180, 102 for BDMs/BDMf, Invf, Invf_plateau
+# Extract VS results ####
+vs.bdms <- extract.vsr("variable_selection/bdms_transformed", sample.bdms)
 
 # Get mean relative deviance for each model over entire community (excluding rare taxa)
-d.mean <- d %>%
-  filter(!is.infinite(rdev.test), n > r) %>%
+vs.bdms.mean <- vs.bdms %>%
+  filter(!is.infinite(rdev.test) & n > 56) %>%
   group_by(Model) %>%
   summarise(mrd.train = mean(rdev.train, na.rm=TRUE), mrd.test = mean(rdev.test, na.rm=TRUE)) %>%
   arrange(mrd.test) %>%
   mutate(Parameters = vapply(strsplit(Model, " "), length, integer(1)))
 
+View(vs.bdms.mean)
+
+# write.csv(vs.bdms.mean, 'outputs/variable_selection/bdms_transformed/vs_bdms_mean.csv', row.names = FALSE)
+
+vs.bdms.ut <- extract.vsr("variable_selection/bdms_untransformed", sample.bdms)
+
+# Get mean relative deviance for each model over entire community (excluding rare taxa)
+vs.bdms.mean.ut <- vs.bdms.ut %>%
+  filter(!is.infinite(rdev.test) & n > 56) %>%
+  group_by(Model) %>%
+  summarise(mrd.train = mean(rdev.train, na.rm=TRUE), mrd.test = mean(rdev.test, na.rm=TRUE)) %>%
+  arrange(mrd.test) %>%
+  mutate(Parameters = vapply(strsplit(Model, " "), length, integer(1)))
+
+View(vs.bdms.mean.ut)
+
+# write.csv(vs.bdms.mean.ut, 'outputs/variable_selection/bdms_untransformed/vs_bdms_mean_ut.csv', row.names = FALSE)
+
+test <- filter(vs.bdms.mean.ut, !grepl('SS1|SS2|SS3', Model))
+
 # d.mean <- filter(d.mean, Parameters >= 4 & Parameters <= 6)
 # d.mean.invf46 <- d.mean
 
-write.csv(d.mean, paste('outputs',vs,'meandev_models.csv',sep='/'))
+# write.csv(d.mean, paste('outputs',vs,'meandev_models.csv',sep='/'))
 
 # rare.occurrences <- c(7, 20, 30, 40, 56)
 # pdf('variable_frequency_rarity_BDMSp.pdf', paper='special', width = 14, height = 8.5)
@@ -77,21 +54,20 @@ write.csv(d.mean, paste('outputs',vs,'meandev_models.csv',sep='/'))
 # dev.off()
 
 ### DEVIANCES ####
-d.mean <- d.mean %>%
+plot.data <- vs.bdms.mean %>%
   arrange(Parameters) %>%
   group_by(Parameters) %>%
   mutate(Label = paste(Parameters, " parameters (", formatC(uniqueN(Model), big.mark=",")," models)", sep="")) %>%
-  ungroup()
-  
-d.mean$Label <- factor(d.mean$Label, levels = unique(d.mean$Label))
+  ungroup() %>%
+  mutate(Label = factor(Label, levels = unique(Label)))
 
-d.mean.points <- d.mean %>%
+plot.data.points <- plot.data %>%
   group_by(Parameters) %>%
   summarise(x = mean(mrd.train), y = mean(mrd.test))
-label <- levels(d.mean$Label)
-names(label) <- np
-d.mean.points$Label <- label[as.character(d.mean.points$Parameters)]
-d.mean.points$Label <- factor(d.mean.points$Label, levels = unique(d.mean.points$Label))
+label <- levels(plot.data$Label)
+names(label) <- 1:uniqueN(plot.data$Label)
+plot.data.points$Label <- label[as.character(plot.data.points$Parameters)]
+plot.data.points$Label <- factor(plot.data.points$Label, levels = unique(plot.data.points$Label))
 rm(label)
 
 # Other plots ####
@@ -128,14 +104,17 @@ g <- g + labs(title = "Mean standardized deviance (MSD) of prediction vs calibra
 g <- g + guides(colour = guide_legend(override.aes = list(size=6)))
 print(g)
 
-g <- ggplot(d.mean, aes(x = mrd.train, y = mrd.test, color = as.factor(Label)))
+plot.data <- filter(plot.data, Parameters < 11)
+g <- ggplot(plot.data, aes(x = mrd.train, y = mrd.test, color = as.factor(Label)))
 g <- g + geom_point(alpha=0.35)
+# g <- g + geom_density2d(aes(x=mrd.train, y=mrd.test, color = as.factor(Label)))
 g <- g + geom_abline(intercept = 0, slope = 1, color="black", size=1.25, alpha = 0.4)
 g <- g + theme_bw(base_size = 17)
 g <- g + labs(title = "Predictive deviance vs calibration deviance",
-              y = "Mean standardized deviance for prediction",
-              x = "Mean standardized deviance for calibration",
+              y = "Mean standardized deviance during prediction",
+              x = "Mean standardized deviance during calibration",
               color = "Number of Parameters")
+g <- g + theme(plot.title=element_blank())
 g <- g + guides(colour = guide_legend(override.aes = list(size=6)))
 g <- g + scale_colour_brewer(palette = "Set1")
 print(g)
@@ -308,21 +287,6 @@ g <- g + coord_cartesian(ylim=c(0,6.5))
 pdf('outputs/variable_selection_bdms/top10_models_Z.pdf', width = 17, height=9)
 print(g)
 dev.off()
-# slopes$Variable_f <- factor(slopes$Variable, levels=c("Temp", "FV", "FRI", "F10m", "F100m", "SS1", "SS2", "SS3", "IAR", "LUD", "Urban", "UI"))
-# levels(slopes$Variable_f) <- c(expression(paste("Temp (", degree, "C)")),
-#                                     expression(paste("FV (m/s)")),
-#                                     expression(paste("Forest-river intersection (%)")),
-#                                     expression(paste("F10m (%)")),
-#                                     expression(paste("F100m (%)")),
-#                                # 1. "mobile blocs>250mm +  coarse sediments (25-250mm)", 2. "mosses+hydrophytes+coarse organic matter" as two classes that are favorable, and 3. "sand and silt <2.5 mm + mud <0.1 mm" as probably rather unfavorable classes. 
-#                                     expression(paste("Substrate: cobbles+coarse.sed (%)")),
-#                                     expression(paste("Substrate: moss/hydrophytes/coarse-OM (%)")),
-#                                     expression(paste("Substrate: Sand/silt/mud (%)")),
-#                                     expression(paste("IAR (annual spray treatments / % cropland)")),
-#                                     expression(paste("LUD (CE/km"^2,")")),
-#                                     expression(paste("Urban (%)")),
-#                                     expression(paste("Urban index (weighted urban)"))
-#                                     )
 
 # Include occurrence frequency
 slopes$n=n[slopes$Taxon]
@@ -423,12 +387,6 @@ for (m in 1:length(models)){
   # dev.off()
 }
 dev.off()
-
-
-
-
-
-
 
 # P-values ####
 # Test significance of parameters for a given model
