@@ -32,8 +32,13 @@ inv <- read.csv('inputs/invertebrates_2017-04-20.dat', sep='\t', header=TRUE, na
 inputs$taxonomy <- read.csv('inputs/invertebrates_taxonomy_2018-02-23.dat', sep='\t', header=TRUE, stringsAsFactors=FALSE, na.strings=c(""," ","NA"))
 
 # Coordinates for sites and borders of Switzerland
-inputs$ch <- st_read("./inputs","switzerland", stringsAsFactors = F)
+inputs$ch <- st_read("inputs/workspace.gdb", layer="switzerland", stringsAsFactors = F)
 inputs$ch <- filter(inputs$ch, NAME=="Schweiz")
+
+
+inputs$rivers.major <- st_read(dsn = "inputs/workspace.gdb", layer = "major_rivers", stringsAsFactors = F)
+inputs$lakes.major <- st_read(dsn = "inputs/workspace.gdb", layer = "major_lakes", stringsAsFactors = F)
+
 inputs$xy <- select(inv, SiteId, X, Y)
 inputs$xy <- distinct(inputs$xy)
 

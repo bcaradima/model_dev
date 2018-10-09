@@ -3,22 +3,23 @@
 
 # > Select influence factors ####
 # Predictors for paper 1 (BDM species)
-K <- c("Temp", "Temp2", "FV", "F10m", "IAR", "Urban", "LUD")
-predictors <- prepare.inputs(K, sample.bdms, center=TRUE)
-write.csv(predictors, "outputs/predictors_p1.csv", row.names = F)
+# K <- c("Temp", "Temp2", "FV", "F10m", "IAR", "Urban", "LUD")
+# predictors <- prepare.inputs(K, sample.bdms, center=TRUE)
+# write.csv(predictors, "outputs/predictors_p1.csv", row.names = F)
 
+# P2 variable selection ####
 # Predictors for variable selection per dataset (paper 2)
-predictors.vs <- prepare.inputs(c("A10m","A100m","A1km","A.EDO","IAR","TU.Dm","TU.Cr","LUD","Urban","UI","F10m","F100m","F1km", "p_forest", "F.EDO","bFRI","FRI","Temp","FV","WV","BM","Morph","WW","HP","Temp2","Noise"), sample.bdmf, center = TRUE)
-write.csv(predictors.vs, 'outputs/predictors_vs_bdmf.csv', row.names = F)
-
-predictors.vs <- prepare.inputs(c("A10m","A100m","A1km","A.EDO","IAR","TU.Dm","TU.Cr","LUD","Urban","UI","F10m","F100m","F1km", "p_forest", "F.EDO","bFRI","FRI","Temp","FV","WV","BM","Morph","WW","HP","Temp2","Noise"), sample.bdms, center = TRUE)
-write.csv(predictors.vs, 'outputs/predictors_vs_bdms.csv', row.names = F)
-
-predictors.vs <- prepare.inputs(c("A10m","A100m","A1km","A.EDO","IAR","TU.Dm","TU.Cr","LUD","Urban","UI","F10m","F100m","F1km", "p_forest", "F.EDO","bFRI","FRI","Temp","FV","WV","BM","Morph","WW","HP","Temp2","Noise"), sample.invf, center = TRUE)
-write.csv(predictors.vs, 'outputs/predictors_vs_invf.csv', row.names = F)
-
-predictors.vs <- prepare.inputs(c("A10m","A100m","A1km","A.EDO","IAR","TU.Dm","TU.Cr","LUD","Urban","UI","F10m","F100m","F1km", "p_forest", "F.EDO","bFRI","FRI","Temp","FV","WV","BM","Morph","WW","HP","Temp2","Noise"), sample.invf.plat, center = TRUE)
-write.csv(predictors.vs, 'outputs/predictors_vs_invfp.csv', row.names = F)
+# predictors.vs <- prepare.inputs(c("A10m","A100m","A1km","A.EDO","IAR","TU.Dm","TU.Cr","LUD","Urban","UI","F10m","F100m","F1km", "p_forest", "F.EDO","bFRI","FRI","Temp","FV","WV","BM","Morph","WW","HP","Temp2","Noise"), sample.bdmf, center = TRUE)
+# write.csv(predictors.vs, 'outputs/predictors_vs_bdmf.csv', row.names = F)
+# 
+# predictors.vs <- prepare.inputs(c("A10m","A100m","A1km","A.EDO","IAR","TU.Dm","TU.Cr","LUD","Urban","UI","F10m","F100m","F1km", "p_forest", "F.EDO","bFRI","FRI","Temp","FV","WV","BM","Morph","WW","HP","Temp2","Noise"), sample.bdms, center = TRUE)
+# write.csv(predictors.vs, 'outputs/predictors_vs_bdms.csv', row.names = F)
+# 
+# predictors.vs <- prepare.inputs(c("A10m","A100m","A1km","A.EDO","IAR","TU.Dm","TU.Cr","LUD","Urban","UI","F10m","F100m","F1km", "p_forest", "F.EDO","bFRI","FRI","Temp","FV","WV","BM","Morph","WW","HP","Temp2","Noise"), sample.invf, center = TRUE)
+# write.csv(predictors.vs, 'outputs/predictors_vs_invf.csv', row.names = F)
+# 
+# predictors.vs <- prepare.inputs(c("A10m","A100m","A1km","A.EDO","IAR","TU.Dm","TU.Cr","LUD","Urban","UI","F10m","F100m","F1km", "p_forest", "F.EDO","bFRI","FRI","Temp","FV","WV","BM","Morph","WW","HP","Temp2","Noise"), sample.invf.plat, center = TRUE)
+# write.csv(predictors.vs, 'outputs/predictors_vs_invfp.csv', row.names = F)
 
 
 

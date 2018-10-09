@@ -112,25 +112,25 @@ sample.bdms <- bdms[sample(nrow(bdms)),]
 
 n.bdms <- occur.freq(sample.bdms)
 
-# # Choose number of folds
-# k <- 3
-# # Cut the randomly shuffled data into k-folds
-# k.folds <- cut(seq(1, nrow(sample.bdms)), breaks=k, labels=FALSE)
-# 
-# fold1 <- sample.bdms[which(k.folds == 1),]
-# fold2 <- sample.bdms[which(k.folds == 2),]
-# fold3 <- sample.bdms[which(k.folds == 3),]
-# 
-# # Combine the folds manually for the joint model
-# train1 <- bind_rows(fold1, fold2)
-# test1 <- fold3
-# 
-# train2 <- bind_rows(fold2, fold3)
-# test2 <- fold1
-# 
-# train3 <- bind_rows(fold1, fold3)
-# test3 <- fold2
-# 
+# Choose number of folds
+k <- 3
+# Cut the randomly shuffled data into k-folds
+k.folds <- cut(seq(1, nrow(sample.bdms)), breaks=k, labels=FALSE)
+
+fold1 <- sample.bdms[which(k.folds == 1),]
+fold2 <- sample.bdms[which(k.folds == 2),]
+fold3 <- sample.bdms[which(k.folds == 3),]
+
+# Combine the folds manually for the joint model
+train1 <- bind_rows(fold1, fold2)
+test1 <- fold3
+
+train2 <- bind_rows(fold2, fold3)
+test2 <- fold1
+
+train3 <- bind_rows(fold1, fold3)
+test3 <- fold2
+
 # # Write data to /outputs 
 # write.csv(train1, 'outputs/bdm.species.train1.csv', row.names = F)
 # write.csv(test1, 'outputs/bdm.species.test1.csv', row.names = F)

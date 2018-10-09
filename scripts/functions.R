@@ -62,6 +62,7 @@ labeller <- function(inf.fact){
               "FV" = expression(paste("FV (m/s)")),
               
               "F10m" = expression(paste("F10m (%)")),
+              "F100m" = expression(paste("F100m (%)")),
               "FRI" = expression(paste("FRI (%)")),
               "bFRI" = expression(paste("bFRI (%)")),
               
@@ -212,10 +213,10 @@ prepare.inputs <- function(K, y, center){
   if ("Temp" %in% K & !("Temp2" %in% colnames(dt))){
     dt$Temp2 <- dt$Temp^2
   }
-  # If temperature is an input, add a quadratic transformation
-  if ("FV" %in% K & !("FV2" %in% colnames(dt))){
-    dt$FV2 <- dt$FV^2
-  }
+  # # If temperature is an input, add a quadratic transformation
+  # if ("FV" %in% K & !("FV2" %in% colnames(dt))){
+  #   dt$FV2 <- dt$FV^2
+  # }
   # Print number of NAs
   for (k in seq_along(K)){
     variable <- K[k]
@@ -431,16 +432,18 @@ select.isdm <- function(results, taxon) {
 }
 
 # Locates and returns extracted Stan object from joint model results
-select.jsdm <- function(jsdm){
-  logic <- sapply(jsdm, function(i){
-    class(i)[1]=="list"
+select.jsdm <- function(results){
+  ind <- sapply(results, function(i){
+    # class(i)[1]=="list"
+    i$jSDM==TRUE
   })
-  image <- jsdm[[names(logic[logic==TRUE])]]
+  ind <- unlist(ind)
+  image <- results[[names(ind[ind==TRUE])]]
 }
 
 
 # Validation ####
-# Note that in testing iSDMs, predictions are made on NA observations
+# Note that independent predictions are made for samples with NA observations
 cv.isdm <- function(results, data, predictors){
   # Create an output data.table
   pred.dt <- data.table()
@@ -480,15 +483,20 @@ cv.isdm <- function(results, data, predictors){
 
 # Extracts tidy calibration (training) data (probability, parameters, deviance), then performs prediction (testing)
 # against k-fold datasets. Warning: this function assumes a certain folder structure to read jSDM k-fold CV results
-cv.jsdm <- function(trials) {
+cv.jsdm <- function(directory, folders) {
   output = list("deviance" = data.table(), "probability" = data.table())
+  
   # Loop through trials
-  for (t in 1:length(trials)){
-    trial <- trials[t]
+  for (f in 1:length(folders)){
+    folder <- folders[f]
+    cat("Model run: ", folder, " | ")
     for (k in 1:3){
       model.image <- new.env()
-      path <- paste('outputs/jsdm_p2/full model/jsdm_',trial,'_train', k, sep="")
-      load(paste(path, "/Inv_JSDM_D1.RData", sep = ""), envir = model.image)
+      
+      full.path <- paste(getwd(), directory, folder, sep="/")
+      extensions <- identify.jsdm(full.path)
+      load(paste(full.path, paste('_train', k, sep=""),"/", extensions$workspace, sep=""), envir = model.image)
+      cat("Load image -> | ")
       
       # Extract objects from workspace image to local environment
       sites <- model.image$sites
@@ -498,7 +506,7 @@ cv.jsdm <- function(trials) {
       inf.fact <- model.image$inf.fact
       
       set.ident <- model.image$set.ident
-      res <- model.image$res.D1
+      res <- model.image$res
       rm(model.image)
       
       ### Extract parameters
@@ -557,7 +565,7 @@ cv.jsdm <- function(trials) {
                                    Type = "Training",
                                    Fold = k,
                                    Model = "jSDM",
-                                   Trial = trial,
+                                   Trial = folder,
                                    stringsAsFactors = F)
       
       train.deviance$Taxon <- names(std.deviance.train)
@@ -581,12 +589,13 @@ cv.jsdm <- function(trials) {
       p.train$Type <- "Training"
       p.train$Fold <- k
       p.train$Model <- "jSDM"
-      p.train$Trial <- trial
+      p.train$Trial <- folder
       
       ### TEST prob/dev
       # Read observations and inputs for testing 
-      obs.test <- read.csv(paste(path, '/inputs/test', k, '.csv', sep = ''), header = TRUE, stringsAsFactors = F)
-      predictors <- read.csv(paste(path, "/inputs/predictors.csv", sep = ""), header = TRUE, sep = ',', stringsAsFactors = F)
+      paste(full.path, '_train', k, sep="")
+      obs.test <- read.csv(paste(full.path, '_train', k, '/inputs/test', k, '.csv', sep=""), header = TRUE, stringsAsFactors = F)
+      predictors <- read.csv(paste(full.path, '_train', k, '/inputs/predictors.csv', sep=""), header = TRUE, sep = ',', stringsAsFactors = F)
       
       # Drop taxa that do not occur in training data
       y.test <- obs.test[, c("SiteId", "SampId", names(n.train))]
@@ -640,7 +649,7 @@ cv.jsdm <- function(trials) {
                                   Type = "Testing",
                                   Fold = k,
                                   Model = "jSDM",
-                                  Trial = trial,
+                                  Trial = folder,
                                   stringsAsFactors = F)
       
       test.deviance$Taxon <- names(std.deviance.test)
@@ -662,19 +671,20 @@ cv.jsdm <- function(trials) {
       p.test$Type <- "Testing"
       p.test$Fold <- k
       p.test$Model <- "jSDM"
-      p.test$Trial <- trial
+      p.test$Trial <- folder
       
       ### Bind the k-fold results
       output$deviance <- bind_rows(output$deviance, train.deviance)
       output$deviance <- bind_rows(output$deviance, test.deviance)
       output$probability <- bind_rows(output$probability, p.train, p.test)
       
-      cat('Trial / fold: ', trial, "/", k, '\n')
+      cat('Trial / fold: ', folder, "/", k, '\n')
     }
   }
   return(output)
 }
 
+# Calculate predicted probabilities over the full posterior (warning: very memory intensive)
 cv.jsdm.pred <- function(trials){
   pred <- list()
   # pred <- data.table()
@@ -815,6 +825,503 @@ cv.jsdm.pred <- function(trials){
 }
 
 # Process models ####
+# Check R workspace image filename for optional joint model extensions
+# Requires path containing one workspace image as function argument
+# Identifies only very specific filename extensions (use with caution!)
+identify.jsdm <- function(full.path){
+  # Identify the RData workspace image
+  files <- list.files(full.path)
+  workspace <- files[endsWith(files, ".RData")] # failure point: assumes one .RData file
+  
+  # Identify the individual joint model extensions
+  extensions <- gsub(".RData|Inv_JSDM_", "", workspace)
+  extensions <- strsplit(extensions, "_")
+  
+  # Check for community parameter correlations
+  if ("corr" %in% extensions[[1]]){
+    correlations <- 1
+  } else if ("nocorr" %in% extensions[[1]]){
+    correlations <- 0
+  }
+  
+  # Check for site-specific effects
+  if ("site" %in% extensions[[1]]){
+    site.effect <- 1
+  } else if ("nosite" %in% extensions[[1]]){
+    site.effect <- 0
+  }
+  
+  # Check for latent variables
+  latvar <- strsplit(extensions[[1]][3], "latvar")
+  if ("no" %in% latvar){
+    n.latent <- 0
+  } else  if (latvar > 0){
+    n.latent <- as.integer(latvar)
+  } else{
+    n.latent <- 0
+  }
+  model.info <- list("workspace" = workspace,
+                     "correlations" = correlations,
+                     "site.effects" = site.effect,
+                     "n.latent" = n.latent)
+  return(model.info)
+}
+
+# Modified function of extract.jsdm(): Extracts results from directory containing folder or folders of JSDM results
+# into one tidy output (list of data tables and the model)
+# directory <- 'outputs/jsdm_p1'
+# folders <- 'TT1'
+
+# jsdm <- extract.jsdm.extensions(directory, folder)
+
+extract.jsdm <- function(directory, folders) {
+  # Store multiple model data results
+  output <- list("deviance" = data.table(), "probability" = data.table(), "parameters" = data.table())
+  
+  # Loop through JSDMs, loading each workspace image into the local environment
+  for (f in 1:length(folders)){
+    cat("Model: ", folder, " -> | ")
+    
+    cat("Load image -> | ")
+    
+    folder <- folders[f]
+    full.path <- paste(getwd(), directory, folder, sep="/")
+    extensions <- identify.jsdm(full.path)
+    model.image <- new.env()
+    load(paste(full.path, extensions$workspace, sep = "/"), envir = model.image)
+    
+    # Stanfit object
+    res <- model.image$res
+
+    # Peter's code START:
+    # correct chains for multiple local maxima of latent variables:
+    res.orig <- res
+    res.extracted.trace1 <- extract(res,permuted=FALSE,inc_warmup=FALSE)
+   
+    if ( extensions$n.latent > 0 )
+    {
+      name.x    <- "x_lat"
+      name.beta <- "beta_lat"
+      parnames <- names(res@sim$samples[[1]])
+      ind.x    <- which(substring(parnames,1,nchar(name.x))==name.x)
+      ind.beta <- which(substring(parnames,1,nchar(name.beta))==name.beta)
+      ind.notwarmup <- round(res@sim$warmup/res@sim$thin+1):round(res@sim$iter/res@sim$thin)
+      if ( n.latent == 1 )
+      {
+        # calculate mean of x (make it positive for chain 1 for compatibility across runs):
+        s <- 0
+        for ( ind in ind.x ) s <- s + sum(res@sim$samples[[1]][[ind]][ind.notwarmup])
+        if ( s < 0 )  # change sign of both x_lat and beta_lat to keep results equal
+        {
+          for ( ind in ind.x )    res@sim$samples[[1]][[ind]] <- - res@sim$samples[[1]][[ind]]
+          for ( ind in ind.beta ) res@sim$samples[[1]][[ind]] <- - res@sim$samples[[1]][[ind]]
+        }
+        if ( length(res@sim$samples) > 1 )  # adapt other chains to first:
+        {
+          for ( ch in 2:length(res@sim$samples) )
+          {
+            sumsq1 <- 0
+            sumsq2 <- 0
+            for ( ind in ind.x ) 
+            {
+              sumsq1 <- sumsq1 + sum((res@sim$samples[[ch]][[ind]][ind.notwarmup]-res@sim$samples[[1]][[ind]][ind.notwarmup])^2)
+              sumsq2 <- sumsq2 + sum((res@sim$samples[[ch]][[ind]][ind.notwarmup]+res@sim$samples[[1]][[ind]][ind.notwarmup])^2)
+            }
+            if ( sumsq2 < sumsq1 )  # change sign of both x_lat and beta_lat to keep results equal
+            {
+              for ( ind in ind.x )    res@sim$samples[[ch]][[ind]] <- - res@sim$samples[[ch]][[ind]]
+              for ( ind in ind.beta ) res@sim$samples[[ch]][[ind]] <- - res@sim$samples[[ch]][[ind]]
+            }
+          }
+        }
+      }
+      else
+      {
+        if ( n.latent == 2 )
+        {
+          n.x.i      <- round(0.5*length(ind.x))
+          ind.x.1    <- ind.x[1:n.x.i]
+          ind.x.2    <- ind.x.1 + n.x.i
+          ind.beta.1 <- ind.beta[rep(c(TRUE,FALSE),round(0.5*length(ind.beta)))]
+          ind.beta.2 <- ind.beta.1 + 1
+          # calculate mean of x (make it positive for chain 1 for compatibility across runs):
+          s <- 0
+          for ( ind in ind.x.1 ) s <- s + sum(res@sim$samples[[1]][[ind]][ind.notwarmup])
+          if ( s < 0 )  # change sign of both x_lat and beta_lat to keep results equal
+          {
+            for ( ind in ind.x.1 )    res@sim$samples[[1]][[ind]] <- - res@sim$samples[[1]][[ind]]
+            for ( ind in ind.beta.1 ) res@sim$samples[[1]][[ind]] <- - res@sim$samples[[1]][[ind]]
+          }
+          s <- 0
+          for ( ind in ind.x.2 ) s <- s + sum(res@sim$samples[[1]][[ind]][ind.notwarmup])
+          if ( s < 0 )  # change sign of both x_lat and beta_lat to keep results equal
+          {
+            for ( ind in ind.x.2 )    res@sim$samples[[1]][[ind]] <- - res@sim$samples[[1]][[ind]]
+            for ( ind in ind.beta.2 ) res@sim$samples[[1]][[ind]] <- - res@sim$samples[[1]][[ind]]
+          }
+          if ( length(res@sim$samples) > 1 )  # adapt other chains to first:
+          {
+            for ( ch in 2:length(res@sim$samples) )
+            {
+              sumsq1 <- 0
+              sumsq2 <- 0
+              sumsq3 <- 0
+              sumsq4 <- 0
+              for ( ind in ind.x.1 ) 
+              {
+                sumsq1 <- sumsq1 + sum((res@sim$samples[[ch]][[ind]][ind.notwarmup]      -res@sim$samples[[1]][[ind]][ind.notwarmup])^2)
+                sumsq2 <- sumsq2 + sum((res@sim$samples[[ch]][[ind]][ind.notwarmup]      +res@sim$samples[[1]][[ind]][ind.notwarmup])^2)
+                sumsq3 <- sumsq3 + sum((res@sim$samples[[ch]][[ind+n.x.i]][ind.notwarmup]-res@sim$samples[[1]][[ind]][ind.notwarmup])^2)
+                sumsq4 <- sumsq4 + sum((res@sim$samples[[ch]][[ind+n.x.i]][ind.notwarmup]+res@sim$samples[[1]][[ind]][ind.notwarmup])^2)
+              }
+              ind.min <- which.min(c(sumsq1,sumsq2,sumsq3,sumsq4))
+              if ( ind.min < 3 )  # indices of latent variables ok, check signs
+              {
+                if ( ind.min == 2 )  # change sign of variable 1
+                {
+                  for ( ind in ind.x.1 )    res@sim$samples[[ch]][[ind]] <- - res@sim$samples[[ch]][[ind]]
+                  for ( ind in ind.beta.1 ) res@sim$samples[[ch]][[ind]] <- - res@sim$samples[[ch]][[ind]]
+                }
+                sumsq1 <- 0           # check variable 2
+                sumsq2 <- 0
+                for ( ind in ind.x.2 )
+                {
+                  sumsq1 <- sumsq1 + sum((res@sim$samples[[ch]][[ind]][ind.notwarmup]-res@sim$samples[[1]][[ind]][ind.notwarmup])^2)
+                  sumsq2 <- sumsq2 + sum((res@sim$samples[[ch]][[ind]][ind.notwarmup]+res@sim$samples[[1]][[ind]][ind.notwarmup])^2)
+                }
+                if ( sumsq2 < sumsq1 ) # change sign of variable 2 
+                {
+                  for ( ind in ind.x.2 )    res@sim$samples[[ch]][[ind]] <- - res@sim$samples[[ch]][[ind]]
+                  for ( ind in ind.beta.2 ) res@sim$samples[[ch]][[ind]] <- - res@sim$samples[[ch]][[ind]]
+                }
+              }
+              else   # change variables
+              {
+                if ( ind.min == 3 )  # change without changing sign
+                {
+                  for ( ind in ind.x.1 )
+                  {
+                    tmp <- res@sim$samples[[ch]][[ind]]
+                    res@sim$samples[[ch]][[ind]] <- res@sim$samples[[ch]][[ind+n.x.i]]
+                    res@sim$samples[[ch]][[ind+n.x.i]] <- tmp
+                  }
+                  for ( ind in ind.beta.1 ) 
+                  {
+                    tmp <- res@sim$samples[[ch]][[ind]]
+                    res@sim$samples[[ch]][[ind]] <- res@sim$samples[[ch]][[ind+1]]
+                    res@sim$samples[[ch]][[ind+1]] <- tmp
+                  }
+                }
+                else   # change with changing sign
+                {
+                  for ( ind in ind.x.1 )
+                  {
+                    tmp <- res@sim$samples[[ch]][[ind]]
+                    res@sim$samples[[ch]][[ind]] <- - res@sim$samples[[ch]][[ind+n.x.i]]
+                    res@sim$samples[[ch]][[ind+n.x.i]] <- - tmp
+                  }
+                  for ( ind in ind.beta.1 ) 
+                  {
+                    tmp <- res@sim$samples[[ch]][[ind]]
+                    res@sim$samples[[ch]][[ind]] <- - res@sim$samples[[ch]][[ind+1]]
+                    res@sim$samples[[ch]][[ind+1]] <- - tmp
+                  }
+                }
+                sumsq1 <- 0          # check variable 2
+                sumsq2 <- 0
+                for ( ind in ind.x.2 )
+                {
+                  sumsq1 <- sumsq1 + sum((res@sim$samples[[ch]][[ind]][ind.notwarmup]-res@sim$samples[[1]][[ind]][ind.notwarmup])^2)
+                  sumsq2 <- sumsq2 + sum((res@sim$samples[[ch]][[ind]][ind.notwarmup]+res@sim$samples[[1]][[ind]][ind.notwarmup])^2)
+                }
+                if ( sumsq2 < sumsq1 ) # change sign of variable 2 
+                {
+                  for ( ind in ind.x.2 )    res@sim$samples[[ch]][[ind]] <- - res@sim$samples[[ch]][[ind]]
+                  for ( ind in ind.beta.2 ) res@sim$samples[[ch]][[ind]] <- - res@sim$samples[[ch]][[ind]]
+                }
+              }
+            }
+          }
+        }
+        else
+        {
+          print("*** chain merging not yet implemented for more than two latent variables ***\n")
+        }
+      }
+    }
+    
+    # Extract the modified stanfit object
+    res.extracted.trace2 <- extract(res,permuted=FALSE,inc_warmup=FALSE)
+    res.extracted       <- extract(res,permuted=TRUE,inc_warmup=FALSE)
+    # Peter's code END
+    
+    # Extract objects from workspace image and stanfit object
+    sites <- model.image$sites # sites with complete predictors and non-zero taxa included in Stan model
+    samples <- model.image$samples
+    occur.taxa <- model.image$occur.taxa # non-zero site-species matrix included in Stan model
+    env.cond <- model.image$env.cond # complete influence factors included in Stan model
+    inf.fact <- model.image$inf.fact # influence factors included in Stan model
+
+    # Name dimensions of posterior beta^taxa samples
+    dimnames(res.extracted[["beta_taxa"]])[[1]] <- 1:dim(res.extracted[["beta_taxa"]][,,])[1]
+    dimnames(res.extracted[["beta_taxa"]])[[2]] <- inf.fact
+    dimnames(res.extracted[["beta_taxa"]])[[3]] <- colnames(occur.taxa)
+    
+    x <- as.matrix(env.cond[,inf.fact])
+    colnames(x) <- inf.fact
+    y <- as.matrix(occur.taxa)
+    ind.maxpost <- which.max(res.extracted[["lp__"]])
+    mu.alpha.comm.maxpost <- res.extracted[["mu_alpha_comm"]][ind.maxpost]
+    sigma.alpha.comm.maxpost <- res.extracted[["sigma_alpha_comm"]][ind.maxpost]
+    mu.beta.comm.maxpost  <- res.extracted[["mu_beta_comm"]][ind.maxpost,]
+    sigma.beta.comm.maxpost  <- res.extracted[["sigma_beta_comm"]][ind.maxpost,]
+    names(mu.beta.comm.maxpost) <- inf.fact
+    names(sigma.beta.comm.maxpost) <- inf.fact
+    
+    dimnames(res.extracted[["beta_taxa"]][,,]) <- list(1:dim(res.extracted[["beta_taxa"]][,,])[1], inf.fact, colnames(occur.taxa))
+    colnames(res.extracted[["alpha_taxa"]][,]) <- colnames(occur.taxa)
+    
+    alpha.taxa.maxpost <- res.extracted[["alpha_taxa"]][ind.maxpost,] # alpha at max posterior
+    beta.taxa.maxpost  <- res.extracted[["beta_taxa"]][ind.maxpost,,] # "" ""
+    rownames(beta.taxa.maxpost) <- inf.fact
+    
+    beta <- t(beta.taxa.maxpost)
+    beta <- data.table(beta, stringsAsFactors = F)
+    beta$Taxon <- colnames(occur.taxa)
+    beta <- gather(beta, Variable, Parameter, -Taxon)
+    
+    # Match positions of site-samples to unique sites
+    unique.sites <- unique(sites)
+    siteIND <- match(sites, unique.sites) 
+    
+    if (extensions$site.effects){
+      # Get named vector of site effects
+      gamma.maxpost <- res.extracted[["gamma_site"]][ind.maxpost,]
+      names(gamma.maxpost) <- unique.sites
+      
+      # Get named vectors of random effects applied to the samples
+      gamma.samples <- gamma.maxpost[sites]
+    }
+    
+    if (extensions$n.latent){
+      x.lat <- res.extracted[["x_lat"]]
+      beta.lat <- res.extracted[["beta_lat"]]
+      
+      if (extensions$n.latent==1){
+        x.lat.maxpost <- x.lat[ind.maxpost,]
+        names(x.lat.maxpost) <- unique.sites
+        
+        colnames(beta.lat) <- colnames(occur.taxa)
+        beta.lat.maxpost <- beta.lat[ind.maxpost,]
+        names(beta.lat.maxpost) <- colnames(occur.taxa)
+      } else if (extensions$n.latent > 1){
+        x.lat.maxpost <- x.lat[ind.maxpost,,]
+        rownames(x.lat.maxpost) <- unique.sites
+        colnames(x.lat.maxpost) <- 1:extensions$n.latent
+        
+        beta.lat.maxpost <- beta.lat[ind.maxpost,,]
+        rownames(beta.lat.maxpost) <- 1:extensions$n.latent
+        colnames(beta.lat.maxpost) <- colnames(occur.taxa)
+      }
+    }
+    
+    # Calculate new results based on extracted objects and optional extensions
+    cat("Process -> | ")
+    # Get the occurrence frequency to order labels
+    n <- apply(y, 2, sum, na.rm=T)
+    n <- sort(n, decreasing = T)  
+    
+    ### Probability
+    # If site effects FALSE and latent variables ZERO (simplest joint model)
+    if (!extensions$site.effects & extensions$n.latent==0){
+      z <- matrix(rep(alpha.taxa.maxpost,nrow(x)),nrow=nrow(x),byrow=TRUE) + 
+        x%*%beta.taxa.maxpost
+    }
+    # If site effects TRUE and latent variables FALSE
+    if (extensions$site.effects & !extensions$n.latent){
+      z <- matrix(rep(alpha.taxa.maxpost,nrow(x)),nrow=nrow(x),byrow=TRUE) +
+        x%*%beta.taxa.maxpost + matrix(rep(gamma.samples,ncol(y)),nrow=nrow(x),byrow=FALSE)
+    }
+    # If site effects TRUE and latent variables == 1
+    if (extensions$site.effects & extensions$n.latent){
+      if (extensions$n.latent==1){
+        lv <- sapply(beta.lat.maxpost, function(j){
+          j * x.lat.maxpost[siteIND]
+        })
+        
+        z <- matrix(rep(alpha.taxa.maxpost,nrow(x)),nrow=nrow(x),byrow=TRUE) +
+          x%*%beta.taxa.maxpost + matrix(rep(gamma.samples,ncol(y)),nrow=nrow(x),byrow=FALSE) + lv
+      } else if (extensions$n.latent > 1){
+        # Multiply latent variables with latent coefficients for multiple latent variables
+        x <- x.lat.maxpost[siteIND,]
+        b <- t(beta.lat.maxpost)
+        
+        dim(x)#: 580, 2
+        head(x, 3)
+        dim(b)#: 245, 2
+        head(b, 3)
+
+        j <- b[1, ]
+        
+        # Attempt 1: generates correct output for one example taxa
+        test1 <- t(apply(x, 1, function(i){
+          j * i
+        }))
+        
+        # # Attempt 2: generates matrix with correct results, wrong dimensions
+        test2 <- apply(b, 1, function(j){ # vector of length: 2
+          # cat(j," ", class(j),length(j),"\n")
+          t(apply(x, 1, function(i){
+            j * i
+          })) # dim: 580 rows, 2 cols
+        })
+        
+        # Attempt 3: generate array with correct results and dimensions
+        test3 <- array(apply(b, 1, function(j){
+          apply(x, 1, function(i){
+            j * i
+          })
+        }),
+        dim=c(n.latent, length(samples), ncol(occur.taxa)))
+
+        identical(test1, test3[,,1])
+        
+        # Attempt 4: generate list of matrices with each matrix belonging to a taxon. Bind the matrices together into a 3-dimensional array 
+        test4 <- lapply(rownames(b), function(j){
+          row <- b[j,]
+          t(apply(x, 1, function(i){
+            row * i
+          }))
+        })
+        
+        # test <- do.call(abind, test4)
+        test <- simplify2array(test4)
+      }
+    }
+    p.maxpost <- 1/(1+exp(-z))
+    
+    p.primitive <- apply(y, 2, function(j){sum(j, na.rm=TRUE)/sum(!is.na(j))})
+    p.primitive <- ifelse(p.primitive==0,1e-4,p.primitive)
+    p.primitive <- matrix(rep(p.primitive,nrow(y)),nrow=nrow(y),byrow=TRUE)
+    dev.resid <- sign(y-0.5)*sqrt(-2*(y*log(p.maxpost)+(1-y)*log(1-p.maxpost)))
+    deviance.maxpost   <- sum(dev.resid^2, na.rm = T)
+    deviance.primitive <- -2*sum(y*log(p.primitive)+(1-y)*log(1-p.primitive), na.rm = T)
+    
+    ### Deviance
+    deviance.maxpost.taxa <- apply(dev.resid^2,2,sum, na.rm=T) # NAs removed
+    # Residual deviance
+    deviance.primitive.taxa <- -2*apply(y*log(p.primitive)+(1-y)*log(1-p.primitive),2,sum,na.rm=T)
+    deviance.fit <- 1-deviance.maxpost.taxa/deviance.primitive.taxa ### D2
+    
+    n.samples <- apply(y, 2, function(j){
+      sum(!is.na(j))
+    })
+    
+    deviance <- data.table(Taxon = names(deviance.fit), Model = "jSDM", null.dev = deviance.primitive.taxa, res.dev = deviance.maxpost.taxa, std.res.dev = deviance.maxpost.taxa/n.samples, D2 = deviance.fit, n.samples = n.samples[names(deviance.fit)], n = n[names(deviance.fit)], stringsAsFactors = F)
+    
+    row.names(deviance) <- 1:nrow(deviance)
+    
+    ### Tidy data
+    # Melt the occurrence data into columns of Taxon and Obs
+    obs <- data.table(occur.taxa)
+    obs$SiteId <- sites
+    obs$SampId <- samples
+    obs <- gather(obs, Taxon, Obs, -SiteId, -SampId)
+    
+    # Melt the probabilities into columns of Taxon and Pred
+    prob <- data.table(p.maxpost)
+    colnames(prob) <- colnames(occur.taxa)
+    prob$SiteId <- sites
+    prob$SampId <- samples
+    prob <- gather(prob, Taxon, Pred, -SiteId, -SampId)
+    
+    # Combine occurrence/probability data and join the site coordinates
+    probability <- left_join(obs, prob, by = c("SiteId", "SampId", "Taxon"))
+    probability <- na.omit(probability)
+    rm(obs, prob)
+    
+    ### Prepare output
+    probability$Model <- "jSDM"
+    deviance$Model <- "jSDM"
+    beta$Model <- "jSDM"
+    
+    probability$Trial <- folder
+    deviance$Trial <- folder
+    beta$Trial <- folder
+    
+    # Output results to a list
+    output$extensions <- extensions
+    output[[folder]]$jSDM <- TRUE # flag for select.jsdm() to identify list containing the res.extracted objects
+    
+    if (extensions$site.effects){
+      output[[folder]]$gamma.maxpost <- gamma.maxpost
+      output[[folder]]$gamma.samples <- gamma.samples
+    }
+    
+    if (extensions$correlations){
+      corrfact.comm <- res.extracted[["corrfact_comm"]]
+      dimnames(corrfact.comm)[[1]] <- 1:dim(res.extracted[["corrfact_comm"]][,,])[1]
+      dimnames(corrfact.comm)[[2]] <- inf.fact
+      dimnames(corrfact.comm)[[3]] <- inf.fact
+      
+      corrfact.comm.maxpost <- corrfact.comm[ind.maxpost, ,]
+      output[[folder]]$corrfact.comm <- corrfact.comm
+      output[[folder]]$corrfact.comm.maxpost <- corrfact.comm.maxpost
+    }
+    
+    if (extensions$n.latent==1){
+      output[[folder]]$x.lat <- x.lat
+      output[[folder]]$x.lat.maxpost <- x.lat.maxpost
+      output[[folder]]$beta.lat <- beta.lat
+      output[[folder]]$beta.lat.maxpost <- beta.lat.maxpost
+      output[[folder]]$lv.samples <- lv
+    }
+    
+    output$deviance <- bind_rows(output$deviance, deviance)
+    output$probability <- bind_rows(output$probability, probability)
+    output$parameters <- bind_rows(output$parameters, beta)
+    
+    # Store the site, samples, community, and input data
+    output[[folder]]$sites <- sites
+    output[[folder]]$samples <- samples
+    output[[folder]]$occur.taxa <- occur.taxa
+    output[[folder]]$inf.fact <- inf.fact
+    output[[folder]]$env.cond <- env.cond
+    
+    # Store priors for community parameters
+    output[[folder]]$mu.alpha.comm.pripar <- model.image$data$mu_alpha_comm_pripar
+    output[[folder]]$sigma.alpha.comm.pripar <- model.image$data$sigma_alpha_comm_pripar
+    output[[folder]]$mu.beta.comm.pripar <- model.image$data$mu_beta_comm_pripar
+    output[[folder]]$sigma.beta.comm.pripar <- model.image$data$sigma_beta_comm_pripar
+    
+    # Store max. posterior community parameters
+    output[[folder]]$mu.alpha.comm <- res.extracted[["mu_alpha_comm"]]
+    output[[folder]]$mu.alpha.comm.maxpost <- mu.alpha.comm.maxpost
+    output[[folder]]$sigma.alpha.comm <- res.extracted[["sigma_alpha_comm"]]
+    output[[folder]]$sigma.alpha.comm.maxpost <- sigma.alpha.comm.maxpost
+    
+    colnames(res.extracted[["mu_beta_comm"]]) <- inf.fact
+    output[[folder]]$mu.beta.comm <- res.extracted[["mu_beta_comm"]]
+    output[[folder]]$mu.beta.comm.maxpost <- mu.beta.comm.maxpost
+    
+    colnames(res.extracted[["sigma_beta_comm"]]) <- inf.fact
+    output[[folder]]$sigma.beta.comm <- res.extracted[["sigma_beta_comm"]]
+    output[[folder]]$sigma.beta.comm.maxpost <- sigma.beta.comm.maxpost
+    
+    # Store posterior taxon-specific parameters
+    output[[folder]]$alpha.taxa <- res.extracted[["alpha_taxa"]]
+    output[[folder]]$alpha.taxa.maxpost <- alpha.taxa.maxpost
+    
+    output[[folder]]$beta.taxa  <- res.extracted[["beta_taxa"]]
+    output[[folder]]$beta.taxa.maxpost <- beta.taxa.maxpost
+    
+    
+    
+    cat("DONE","\n")
+  }
+  return(output)
+}
+
 # Return tidy, complete Variable Selection Results (VSR; no summary statistics are calculated)
 extract.vsr <- function(trial, sample){
   image <- new.env()
@@ -854,7 +1361,6 @@ extract.vsr <- function(trial, sample){
 
 # Propogate quantiles of a subsample of the posterior through the jSDM
 # to obtain predicted probabilites based on 5th and 95th quantiles (default arguments)
-# Warning: this function consumes large quantities of memory
 propogate.jsdm.pred <- function(result, get.quantiles=TRUE, quantiles=c(0.05, 0.95)){
   jsdm <- select.jsdm(result)
   
@@ -949,235 +1455,235 @@ propogate.jsdm.pred <- function(result, get.quantiles=TRUE, quantiles=c(0.05, 0.
   return(prob)
 }
 
-# Extract results from calibrated jSDM
-extract.jsdm <- function(dir, trials, epsilon) {
-  if (missing(epsilon)){
-    epsilon <- FALSE
-  }
-  # Create a local environment for loading workspace image
-  model.image <- new.env()
-  
-  # Store multiple model data results
-  output <- list("deviance" = data.table(), "probability" = data.table(), "parameters" = data.table())
-  # Loop through JSDM trials, loading each workspace image into the local environment
-  for (t in 1:length(trials)){
-    cat("Trial: ", trials[t], " | ")
-    load(paste(dir,"/jsdm_",trials[t], "/Inv_JSDM_D1.RData", sep = ""), envir = model.image)
-    cat("Load image -> | ")
-    
-    # Extract objects from workspace image to local environment
-    sites <- model.image$sites # sites with complete predictors and non-zero taxa included in Stan model
-    samples <- model.image$samples
-    occur.taxa <- model.image$occur.taxa # non-zero site-species matrix included in Stan model
-    env.cond <- model.image$env.cond # complete influence factors included in Stan model
-    inf.fact <- model.image$inf.fact # influence factors included in Stan model
-    
-    set.ident <- model.image$set.ident
-    res <- model.image$res.D1
-    res.extracted <- extract(res,permuted=TRUE,inc_warmup=FALSE)
-    
-    # Name dimensions of posterior beta^taxa samples
-    dimnames(res.extracted[["beta_taxa"]])[[1]] <- 1:dim(res.extracted[["beta_taxa"]][,,])[1]
-    dimnames(res.extracted[["beta_taxa"]])[[2]] <- inf.fact
-    dimnames(res.extracted[["beta_taxa"]])[[3]] <- colnames(occur.taxa)
-    
-    # res.summary <- summary(res)
-    # res.table <- res.summary$summary
-    # 
-    # 
-    # # Extract parameter names
-    # tname <- colnames(occur.taxa)
-    # r <- row.names(res.table) # get the parameter names
-    # 
-    # # Replace the beta parameter names
-    # q <- r[grep("beta_taxa", r)]
-    # q <- gsub(".*\\[(.*)\\].*", "\\1", q)
-    # q <- strsplit(q, ",")
-    # q <- lapply(q, as.numeric)
-    # q <- lapply(q, function(x){
-    #   x <- paste(inf.fact[x[1]],"_", tname[x[2]], sep = "")
-    # })
-    # q <- unlist(q)
-    # r[grep("beta_taxa", r)] <- q
-    # 
-    # # Replace the intercept names
-    # q <- r[grep("alpha_taxa", r)]
-    # q <- gsub(".*\\[(.*)\\].*", "\\1", q)
-    # q <- as.numeric(q)
-    # q <- sapply(q, function(x){
-    #   x <- paste("alpha_", tname[x], sep = "")
-    # })
-    # r[grep("alpha_taxa", r)] <- q
-    # rm(tname, q)
-    # 
-    # dims <- dim(res.extracted.trace)
-    # 
-    # plot.nrow <- 10
-    # plot.ncol <-  5
-    # 
-    # pdf(paste("outputs/jsdm_cmodel/jsdm_", trials[t],"/",trials[t],"_traceplots.pdf", sep=""),width=8,height=12)
-    # par(mfrow=c(plot.nrow,plot.ncol),mar=c(2,2,2,0.5)+0.2) # c(bottom, left, top, right)
-    # for ( i in 1:ceiling(length(names(res))/(plot.nrow*plot.ncol)) )
-    # {
-    #   start <- (i-1)*plot.nrow*plot.ncol+1
-    #   end   <- min(start+plot.nrow*plot.ncol-1,length(names(res)))
-    #   for ( j in start:end )
-    #   {
-    #     plot(numeric(0),numeric(0),type="n",cex.axis=0.8,
-    #          xlim=c(0,dims[1]),ylim=range(res.extracted.trace[,,j]),xlab="",ylab="")
-    #     title(main=r[j], cex.main = 0.7)
-    #     # dimnames(res.extracted.trace)[[3]][j]
-    #     for ( k in 1:dims[2] ) lines(1:dims[1],res.extracted.trace[,k,j],col=k)
-    #   }
-    # }
-    # dev.off()
-    # cat("Traceplots -> | ")
-    
-    x <- as.matrix(env.cond[set.ident,inf.fact])
-    colnames(x) <- inf.fact
-    y <- as.matrix(occur.taxa[set.ident,])
-    ind.maxpost <- which.max(res.extracted[["lp__"]])
-    mu.alpha.comm.maxpost <- res.extracted[["mu_alpha_comm"]][ind.maxpost]
-    sigma.alpha.comm.maxpost <- res.extracted[["sigma_alpha_comm"]][ind.maxpost]
-    mu.beta.comm.maxpost  <- res.extracted[["mu_beta_comm"]][ind.maxpost,]
-    sigma.beta.comm.maxpost  <- res.extracted[["sigma_beta_comm"]][ind.maxpost,]
-    names(mu.beta.comm.maxpost) <- inf.fact
-    names(sigma.beta.comm.maxpost) <- inf.fact
-    
-    dimnames(res.extracted[["beta_taxa"]][,,]) <- list(1:dim(res.extracted[["beta_taxa"]][,,])[1], inf.fact, colnames(occur.taxa))
-    colnames(res.extracted[["alpha_taxa"]][,]) <- colnames(occur.taxa)
-    
-    alpha.taxa.maxpost <- res.extracted[["alpha_taxa"]][ind.maxpost,] # alpha at max posterior
-    beta.taxa.maxpost  <- res.extracted[["beta_taxa"]][ind.maxpost,,] # "" ""
-    rownames(beta.taxa.maxpost) <- inf.fact
-    
-    if (epsilon){
-      # Match positions of site-samples to unique sites
-      unique.sites <- unique(sites)
-      siteIND <- match(sites, unique.sites) 
-      
-      # Get named vector of site-specific random effects
-      eps.maxpost <- res.extracted[["eps"]][ind.maxpost,]
-      names(eps.maxpost) <- unique.sites
-      
-      # Get named vectors of random effects applied to the samples
-      eps.x <- eps.maxpost[sites]
-    }
-    
-    # Get the occurrence frequency to order labels
-    n <- apply(y, 2, sum, na.rm=T)
-    n <- sort(n, decreasing = T)  
-    
-    cat("Process -> | ")
-    
-    beta <- t(beta.taxa.maxpost)
-    beta <- data.table(beta, stringsAsFactors = F)
-    beta$Taxon <- colnames(occur.taxa)
-    beta <- gather(beta, Variable, Parameter, -Taxon)
-    
-    ### Probability
-    if (epsilon){
-      z <- matrix(rep(alpha.taxa.maxpost,nrow(x)),nrow=nrow(x),byrow=TRUE) +
-        x%*%beta.taxa.maxpost + matrix(rep(eps.x,ncol(y)),nrow=nrow(x),byrow=FALSE)
-    }else{
-      z <- matrix(rep(alpha.taxa.maxpost,nrow(x)),nrow=nrow(x),byrow=TRUE) + 
-        x%*%beta.taxa.maxpost
-    }
-    p.maxpost <- 1/(1+exp(-z))
-    # p.primitive <- apply(y,2,sum, na.rm = TRUE)/nrow(y) # NAs removed
-    p.primitive <- apply(y, 2, function(j){sum(j, na.rm=TRUE)/sum(!is.na(j))})
-    p.primitive <- ifelse(p.primitive==0,1e-4,p.primitive)
-    p.primitive <- matrix(rep(p.primitive,nrow(y)),nrow=nrow(y),byrow=TRUE)
-    dev.resid <- sign(y-0.5)*sqrt(-2*(y*log(p.maxpost)+(1-y)*log(1-p.maxpost)))
-    deviance.maxpost   <- sum(dev.resid^2, na.rm = T)
-    deviance.primitive <- -2*sum(y*log(p.primitive)+(1-y)*log(1-p.primitive), na.rm = T)
-    
-    ### Deviance
-    deviance.maxpost.taxa <- apply(dev.resid^2,2,sum, na.rm=T) # NAs removed
-    # Residual deviance
-    deviance.primitive.taxa <- -2*apply(y*log(p.primitive)+(1-y)*log(1-p.primitive),2,sum,na.rm=T)
-    deviance.fit <- 1-deviance.maxpost.taxa/deviance.primitive.taxa ### D2
-    
-    n.samples <- apply(y, 2, function(j){
-      sum(!is.na(j))
-    })
-    
-    deviance <- data.table(Taxon = names(deviance.fit), Model = "jSDM", null.dev = deviance.primitive.taxa, res.dev = deviance.maxpost.taxa, std.res.dev = deviance.maxpost.taxa/n.samples, D2 = deviance.fit, n.samples = n.samples[names(deviance.fit)], n = n[names(deviance.fit)], stringsAsFactors = F)
-    
-    row.names(deviance) <- 1:nrow(deviance)
-    
-    ### Tidy data
-    # Melt the occurrence data into columns of Taxon and Obs
-    obs <- data.table(occur.taxa)
-    obs$SiteId <- sites
-    obs$SampId <- samples
-    obs <- gather(obs, Taxon, Obs, -SiteId, -SampId)
-    
-    # Melt the probabilities into columns of Taxon and Pred
-    prob <- data.table(p.maxpost)
-    colnames(prob) <- colnames(occur.taxa)
-    prob$SiteId <- sites
-    prob$SampId <- samples
-    prob <- gather(prob, Taxon, Pred, -SiteId, -SampId)
-    
-    # Combine occurrence/probability data and join the site coordinates
-    probability <- left_join(obs, prob, by = c("SiteId", "SampId", "Taxon"))
-    probability <- na.omit(probability)
-    rm(obs, prob)
-    
-    ### Prepare output
-    probability$Model <- "jSDM"
-    deviance$Model <- "jSDM"
-    beta$Model <- "jSDM"
-    
-    probability$Trial <- trials[t]
-    deviance$Trial <- trials[t]
-    beta$Trial <- trials[t]
-    
-    if (epsilon){
-      output$eps.maxpost <- eps.maxpost
-      output$eps.x <- eps.x
-    }
-    
-    output$deviance <- bind_rows(output$deviance, deviance)
-    output$probability <- bind_rows(output$probability, probability)
-    output$parameters <- bind_rows(output$parameters, beta)
-    
-    # Store the site, samples, community, and input data
-    output[[trials[t]]] <- res.extracted
-    output[[trials[t]]]$sites <- sites
-    output[[trials[t]]]$samples <- samples
-    output[[trials[t]]]$occur.taxa <- occur.taxa
-    output[[trials[t]]]$inf.fact <- inf.fact
-    output[[trials[t]]]$env.cond <- env.cond
-    
-    # Store priors for community parameters
-    output[[trials[t]]]$mu_alpha_comm_pripar <- model.image$data$mu_alpha_comm_pripar
-    output[[trials[t]]]$sigma_alpha_comm_pripar <- model.image$data$sigma_alpha_comm_pripar
-    output[[trials[t]]]$mu_beta_comm_pripar <- model.image$data$mu_beta_comm_pripar
-    output[[trials[t]]]$sigma_beta_comm_pripar <- model.image$data$sigma_beta_comm_pripar
-    
-    # Store max. posterior community parameters
-    output[[trials[t]]]$mu.alpha.comm.maxpost <- mu.alpha.comm.maxpost
-    output[[trials[t]]]$sigma.alpha.comm.maxpost <- sigma.alpha.comm.maxpost
-    output[[trials[t]]]$mu.beta.comm.maxpost <- mu.beta.comm.maxpost
-    output[[trials[t]]]$sigma.beta.comm.maxpost <- sigma.beta.comm.maxpost
-    
-    # Store max. posterior taxon parameters
-    output[[trials[t]]]$alpha.taxa.maxpost <- alpha.taxa.maxpost
-    output[[trials[t]]]$beta.taxa.maxpost <- beta.taxa.maxpost
-    
-    cat("DONE","\n")
-  }
-  return(output)
-}
+# # Extract results from calibrated jSDM
+# extract.jsdm <- function(dir, trials, epsilon) {
+#   if (missing(epsilon)){
+#     epsilon <- FALSE
+#   }
+#   # Create a local environment for loading workspace image
+#   model.image <- new.env()
+#   
+#   # Store multiple model data results
+#   output <- list("deviance" = data.table(), "probability" = data.table(), "parameters" = data.table())
+#   # Loop through JSDM trials, loading each workspace image into the local environment
+#   for (t in 1:length(trials)){
+#     cat("Trial: ", trials[t], " | ")
+#     load(paste(dir,"/jsdm_",trials[t], "/Inv_JSDM_D1.RData", sep = ""), envir = model.image)
+#     cat("Load image -> | ")
+#     
+#     # Extract objects from workspace image to local environment
+#     sites <- model.image$sites # sites with complete predictors and non-zero taxa included in Stan model
+#     samples <- model.image$samples
+#     occur.taxa <- model.image$occur.taxa # non-zero site-species matrix included in Stan model
+#     env.cond <- model.image$env.cond # complete influence factors included in Stan model
+#     inf.fact <- model.image$inf.fact # influence factors included in Stan model
+#     
+#     set.ident <- model.image$set.ident
+#     res <- model.image$res.D1
+#     res.extracted <- extract(res,permuted=TRUE,inc_warmup=FALSE)
+#     
+#     # Name dimensions of posterior beta^taxa samples
+#     dimnames(res.extracted[["beta_taxa"]])[[1]] <- 1:dim(res.extracted[["beta_taxa"]][,,])[1]
+#     dimnames(res.extracted[["beta_taxa"]])[[2]] <- inf.fact
+#     dimnames(res.extracted[["beta_taxa"]])[[3]] <- colnames(occur.taxa)
+#     
+#     # res.summary <- summary(res)
+#     # res.table <- res.summary$summary
+#     # 
+#     # 
+#     # # Extract parameter names
+#     # tname <- colnames(occur.taxa)
+#     # r <- row.names(res.table) # get the parameter names
+#     # 
+#     # # Replace the beta parameter names
+#     # q <- r[grep("beta_taxa", r)]
+#     # q <- gsub(".*\\[(.*)\\].*", "\\1", q)
+#     # q <- strsplit(q, ",")
+#     # q <- lapply(q, as.numeric)
+#     # q <- lapply(q, function(x){
+#     #   x <- paste(inf.fact[x[1]],"_", tname[x[2]], sep = "")
+#     # })
+#     # q <- unlist(q)
+#     # r[grep("beta_taxa", r)] <- q
+#     # 
+#     # # Replace the intercept names
+#     # q <- r[grep("alpha_taxa", r)]
+#     # q <- gsub(".*\\[(.*)\\].*", "\\1", q)
+#     # q <- as.numeric(q)
+#     # q <- sapply(q, function(x){
+#     #   x <- paste("alpha_", tname[x], sep = "")
+#     # })
+#     # r[grep("alpha_taxa", r)] <- q
+#     # rm(tname, q)
+#     # 
+#     # dims <- dim(res.extracted.trace)
+#     # 
+#     # plot.nrow <- 10
+#     # plot.ncol <-  5
+#     # 
+#     # pdf(paste("outputs/jsdm_cmodel/jsdm_", trials[t],"/",trials[t],"_traceplots.pdf", sep=""),width=8,height=12)
+#     # par(mfrow=c(plot.nrow,plot.ncol),mar=c(2,2,2,0.5)+0.2) # c(bottom, left, top, right)
+#     # for ( i in 1:ceiling(length(names(res))/(plot.nrow*plot.ncol)) )
+#     # {
+#     #   start <- (i-1)*plot.nrow*plot.ncol+1
+#     #   end   <- min(start+plot.nrow*plot.ncol-1,length(names(res)))
+#     #   for ( j in start:end )
+#     #   {
+#     #     plot(numeric(0),numeric(0),type="n",cex.axis=0.8,
+#     #          xlim=c(0,dims[1]),ylim=range(res.extracted.trace[,,j]),xlab="",ylab="")
+#     #     title(main=r[j], cex.main = 0.7)
+#     #     # dimnames(res.extracted.trace)[[3]][j]
+#     #     for ( k in 1:dims[2] ) lines(1:dims[1],res.extracted.trace[,k,j],col=k)
+#     #   }
+#     # }
+#     # dev.off()
+#     # cat("Traceplots -> | ")
+#     
+#     x <- as.matrix(env.cond[set.ident,inf.fact])
+#     colnames(x) <- inf.fact
+#     y <- as.matrix(occur.taxa[set.ident,])
+#     ind.maxpost <- which.max(res.extracted[["lp__"]])
+#     mu.alpha.comm.maxpost <- res.extracted[["mu_alpha_comm"]][ind.maxpost]
+#     sigma.alpha.comm.maxpost <- res.extracted[["sigma_alpha_comm"]][ind.maxpost]
+#     mu.beta.comm.maxpost  <- res.extracted[["mu_beta_comm"]][ind.maxpost,]
+#     sigma.beta.comm.maxpost  <- res.extracted[["sigma_beta_comm"]][ind.maxpost,]
+#     names(mu.beta.comm.maxpost) <- inf.fact
+#     names(sigma.beta.comm.maxpost) <- inf.fact
+#     
+#     dimnames(res.extracted[["beta_taxa"]][,,]) <- list(1:dim(res.extracted[["beta_taxa"]][,,])[1], inf.fact, colnames(occur.taxa))
+#     colnames(res.extracted[["alpha_taxa"]][,]) <- colnames(occur.taxa)
+#     
+#     alpha.taxa.maxpost <- res.extracted[["alpha_taxa"]][ind.maxpost,] # alpha at max posterior
+#     beta.taxa.maxpost  <- res.extracted[["beta_taxa"]][ind.maxpost,,] # "" ""
+#     rownames(beta.taxa.maxpost) <- inf.fact
+#     
+#     if (epsilon){
+#       # Match positions of site-samples to unique sites
+#       unique.sites <- unique(sites)
+#       siteIND <- match(sites, unique.sites) 
+#       
+#       # Get named vector of site-specific random effects
+#       eps.maxpost <- res.extracted[["eps"]][ind.maxpost,]
+#       names(eps.maxpost) <- unique.sites
+#       
+#       # Get named vectors of random effects applied to the samples
+#       eps.x <- eps.maxpost[sites]
+#     }
+#     
+#     # Get the occurrence frequency to order labels
+#     n <- apply(y, 2, sum, na.rm=T)
+#     n <- sort(n, decreasing = T)  
+#     
+#     cat("Process -> | ")
+#     
+#     beta <- t(beta.taxa.maxpost)
+#     beta <- data.table(beta, stringsAsFactors = F)
+#     beta$Taxon <- colnames(occur.taxa)
+#     beta <- gather(beta, Variable, Parameter, -Taxon)
+#     
+#     ### Probability
+#     if (epsilon){
+#       z <- matrix(rep(alpha.taxa.maxpost,nrow(x)),nrow=nrow(x),byrow=TRUE) +
+#         x%*%beta.taxa.maxpost + matrix(rep(eps.x,ncol(y)),nrow=nrow(x),byrow=FALSE)
+#     }else{
+#       z <- matrix(rep(alpha.taxa.maxpost,nrow(x)),nrow=nrow(x),byrow=TRUE) + 
+#         x%*%beta.taxa.maxpost
+#     }
+#     p.maxpost <- 1/(1+exp(-z))
+#     # p.primitive <- apply(y,2,sum, na.rm = TRUE)/nrow(y) # NAs removed
+#     p.primitive <- apply(y, 2, function(j){sum(j, na.rm=TRUE)/sum(!is.na(j))})
+#     p.primitive <- ifelse(p.primitive==0,1e-4,p.primitive)
+#     p.primitive <- matrix(rep(p.primitive,nrow(y)),nrow=nrow(y),byrow=TRUE)
+#     dev.resid <- sign(y-0.5)*sqrt(-2*(y*log(p.maxpost)+(1-y)*log(1-p.maxpost)))
+#     deviance.maxpost   <- sum(dev.resid^2, na.rm = T)
+#     deviance.primitive <- -2*sum(y*log(p.primitive)+(1-y)*log(1-p.primitive), na.rm = T)
+#     
+#     ### Deviance
+#     deviance.maxpost.taxa <- apply(dev.resid^2,2,sum, na.rm=T) # NAs removed
+#     # Residual deviance
+#     deviance.primitive.taxa <- -2*apply(y*log(p.primitive)+(1-y)*log(1-p.primitive),2,sum,na.rm=T)
+#     deviance.fit <- 1-deviance.maxpost.taxa/deviance.primitive.taxa ### D2
+#     
+#     n.samples <- apply(y, 2, function(j){
+#       sum(!is.na(j))
+#     })
+#     
+#     deviance <- data.table(Taxon = names(deviance.fit), Model = "jSDM", null.dev = deviance.primitive.taxa, res.dev = deviance.maxpost.taxa, std.res.dev = deviance.maxpost.taxa/n.samples, D2 = deviance.fit, n.samples = n.samples[names(deviance.fit)], n = n[names(deviance.fit)], stringsAsFactors = F)
+#     
+#     row.names(deviance) <- 1:nrow(deviance)
+#     
+#     ### Tidy data
+#     # Melt the occurrence data into columns of Taxon and Obs
+#     obs <- data.table(occur.taxa)
+#     obs$SiteId <- sites
+#     obs$SampId <- samples
+#     obs <- gather(obs, Taxon, Obs, -SiteId, -SampId)
+#     
+#     # Melt the probabilities into columns of Taxon and Pred
+#     prob <- data.table(p.maxpost)
+#     colnames(prob) <- colnames(occur.taxa)
+#     prob$SiteId <- sites
+#     prob$SampId <- samples
+#     prob <- gather(prob, Taxon, Pred, -SiteId, -SampId)
+#     
+#     # Combine occurrence/probability data and join the site coordinates
+#     probability <- left_join(obs, prob, by = c("SiteId", "SampId", "Taxon"))
+#     probability <- na.omit(probability)
+#     rm(obs, prob)
+#     
+#     ### Prepare output
+#     probability$Model <- "jSDM"
+#     deviance$Model <- "jSDM"
+#     beta$Model <- "jSDM"
+#     
+#     probability$Trial <- trials[t]
+#     deviance$Trial <- trials[t]
+#     beta$Trial <- trials[t]
+#     
+#     if (epsilon){
+#       output$eps.maxpost <- eps.maxpost
+#       output$eps.x <- eps.x
+#     }
+#     
+#     output$deviance <- bind_rows(output$deviance, deviance)
+#     output$probability <- bind_rows(output$probability, probability)
+#     output$parameters <- bind_rows(output$parameters, beta)
+#     
+#     # Store the site, samples, community, and input data
+#     output[[trials[t]]] <- res.extracted
+#     output[[trials[t]]]$sites <- sites
+#     output[[trials[t]]]$samples <- samples
+#     output[[trials[t]]]$occur.taxa <- occur.taxa
+#     output[[trials[t]]]$inf.fact <- inf.fact
+#     output[[trials[t]]]$env.cond <- env.cond
+#     
+#     # Store priors for community parameters
+#     output[[trials[t]]]$mu_alpha_comm_pripar <- model.image$data$mu_alpha_comm_pripar
+#     output[[trials[t]]]$sigma_alpha_comm_pripar <- model.image$data$sigma_alpha_comm_pripar
+#     output[[trials[t]]]$mu_beta_comm_pripar <- model.image$data$mu_beta_comm_pripar
+#     output[[trials[t]]]$sigma_beta_comm_pripar <- model.image$data$sigma_beta_comm_pripar
+#     
+#     # Store max. posterior community parameters
+#     output[[trials[t]]]$mu.alpha.comm.maxpost <- mu.alpha.comm.maxpost
+#     output[[trials[t]]]$sigma.alpha.comm.maxpost <- sigma.alpha.comm.maxpost
+#     output[[trials[t]]]$mu.beta.comm.maxpost <- mu.beta.comm.maxpost
+#     output[[trials[t]]]$sigma.beta.comm.maxpost <- sigma.beta.comm.maxpost
+#     
+#     # Store max. posterior taxon parameters
+#     output[[trials[t]]]$alpha.taxa.maxpost <- alpha.taxa.maxpost
+#     output[[trials[t]]]$beta.taxa.maxpost <- beta.taxa.maxpost
+#     
+#     cat("DONE","\n")
+#   }
+#   return(output)
+# }
 
 # Extract significant responses from posterior taxon-specific parameters based on 5% p-values
 extract.resp <- function(results){
   jsdm <- select.jsdm(results)
   n <- occur.freq(jsdm$occur.taxa)
   
-  beta.samples <- jsdm$beta_taxa
+  beta.samples <- jsdm$beta.taxa
   dimnames(beta.samples) <- list(1:dim(beta.samples)[1], jsdm$inf.fact, colnames(jsdm$occur.taxa)) # name the dimensions
   taxon.samples <- melt(beta.samples)
   colnames(taxon.samples) <- c("Sample", "Variable", "Taxon", "Value")
@@ -1219,94 +1725,121 @@ extract.resp <- function(results){
 }
 
 # Given a jSDM result, extract the linear predictor (z) per variable/taxon/sample (z=beta*(x-mean(x))). Uncentered inputs are constructed within the function by calling prepare.inputs().
-# - optimize with lapply() and rbindlist() rather than using loop/rbind
 linear.predictor <- function(results){
   jsdm <- select.jsdm(results)
   
   inf.fact <- jsdm$inf.fact
   inf.fact <- inf.fact[!(inf.fact=="Temp2")]
   
-  n <- apply(jsdm$occur.taxa, 2, sum, na.rm=TRUE)
-  n <- sort(n, decreasing = T)
+  n <- occur.freq(jsdm$occur.taxa)
+
+  # Failure point: untransformed inputs must be prepared based on inputs in JSDM
   
-  # x <- p[, c("SiteId", "SampId", inf.fact)]
-  # x <- x[x$SiteId %in% jsdm$sites & x$SampId %in% jsdm$samples, ]
-  x <- prepare.inputs(inf.fact, sample.invf, center = F)
-  x <- select(x, -Temp2)
-  setDT(x)
+  x <- p[, c("SiteId", "SampId", inf.fact)]
+  x <- x[x$SiteId %in% jsdm$sites & x$SampId %in% jsdm$samples, ]
+  # x <- prepare.inputs(inf.fact, sample.bdms, center = F)
+  # x <- select(x, -Temp2)
   
-  x.mean <- apply(x[, inf.fact, with=F], 2, mean, na.rm = T)
+  x.mean <- apply(x[, inf.fact], 2, mean, na.rm = T)
   
-  slopes <- data.table()
-  for (k in 1:length(inf.fact)){
-    if (inf.fact[k]=="Temp"){
-      for (j in 1:length(n)){
+  # Loop through taxa in each influence factor, with an exception for Temp (must include Temp^2)
+  K <- lapply(inf.fact, function(k){
+    if (k=="Temp"){
+      J <- lapply(names(n), function(j){
         # Get taxon/variable data
-        taxon <- names(n)[j]
-        variable <- c(inf.fact[k], "Temp2")
+        variable <- c(k, "Temp2")
         
         # Subset parameters
-        bjk <- results$parameters[Taxon==taxon & Variable %in% variable,]
+        bjk <- results$parameters[Taxon==j & Variable %in% variable,]
         bj.temp <- bjk[Variable=="Temp", "Parameter"]$Parameter
         bj.temp2 <- bjk[Variable=="Temp2", "Parameter"]$Parameter
         
         # Select input data
-        x.ik <- x[,c("SiteId", "SampId", "Temp"), with=F]
+        x.ik <- x[,c("SiteId", "SampId", "Temp")]
         xk <- x.ik[["Temp"]]
         
         # Calculate z-scale
-        z.scale <- bj.temp*(xk-x.mean["Temp"]) + bj.temp2*(xk-x.mean["Temp"])^2
+        z <- bj.temp*(xk-x.mean["Temp"]) + bj.temp2*(xk-x.mean["Temp"])^2
         
         # Bind the data
-        dt <- data.table(SiteId = x.ik[["SiteId"]], SampId = x.ik[["SampId"]], z = z.scale, x = xk, Taxon = taxon, Variable=variable[1])
-        slopes <- bind_rows(slopes, dt)
-      }
+        dt <- data.table(SiteId = x.ik[["SiteId"]], SampId = x.ik[["SampId"]], z = z, x = xk, Taxon = j, Variable=variable[1])
+        # slopes <- bind_rows(slopes, dt)
+        return(dt)
+      })
     } else{
-      for (j in 1:length(n)){
-        # Get taxon/variable data
-        taxon <- names(n)[j]
-        variable <- inf.fact[k]
-        
+      J <- lapply(names(n), function(j){
         # Filter data and calculate z-scale
-        bjk <- results$parameters[Taxon==taxon & Variable==variable,]
+        bjk <- results$parameters[Taxon==j & Variable==k,]
         bjk <- bjk$Parameter
         
         # Select input data
-        x.ik <- x[,c("SiteId", "SampId", variable),with=F]
-        xk <- x.ik[[variable]]
+        x.ik <- x[,c("SiteId", "SampId", k)]
+        xk <- x.ik[[k]]
         
         # Calculate z-scale
-        z.scale <- bjk*(xk-x.mean[variable])
+        z <- bjk*(xk-x.mean[k])
         
         # Bind the data
-        dt <- data.table(SiteId = x.ik[["SiteId"]], SampId = x.ik[["SampId"]], z = z.scale, x = xk, Taxon = taxon, Variable=variable)
-        slopes <- bind_rows(slopes, dt)
-      }
+        dt <- data.table(SiteId = x.ik[["SiteId"]], SampId = x.ik[["SampId"]], z = z, x = xk, Taxon = j, Variable = k)
+        # slopes <- bind_rows(slopes, dt)
+        return(dt)
+      })
     }
+    slopes.k <- rbindlist(J)
+    return(slopes.k)
+  })
+  
+  # If a site effect is present, extract the linear predictor
+  if(results$extensions$site.effects==1){
+    gamma.maxpost.samples <- jsdm$gamma.samples
+    
+    dt <- data.table(SiteId = jsdm$sites, SampId = jsdm$samples, z = gamma.maxpost.samples, x = NA, Taxon = NA, Variable = "Site effect")
+    K[[length(K)+1]] <- dt
   }
+  
+  # If a single latent variable is present, extract the linear predictor
+  if(results$extensions$latent.variables==1){
+    x.lat.maxpost <- jsdm$x.lat.maxpost
+    x.lat.maxpost.samples <- x.lat.maxpost[jsdm$sites]
+    
+    dt <- as.tibble(jsdm$lv.samples)
+    
+    dt$SiteId <- jsdm$sites
+    dt$SampId <- jsdm$samples
+    dt$x <- x.lat.maxpost.samples
+    dt$Variable <- "LV"
+    dt <- gather(dt, Taxon, z, -SiteId, -SampId, -x, -Variable)
+    dt <- select(dt, SiteId, SampId, z, x, Taxon, Variable)
+    
+    K[[length(K)+1]] <- dt
+  }
+  # Bind the list of data tables into one big data table
+  slopes.K <- rbindlist(K)
+  
   transparency <- n/max(n)
   transparency <- rescale(transparency, to = c(0.05, 0.15))
-  slopes$alpha <- transparency[slopes$Taxon]
+  slopes.K$alpha <- transparency[slopes.K$Taxon]
   
-  return(slopes)
+  return(slopes.K)
 }
-
 # # Extract residual deviance from a jSDM result; analyze dependence of residuals
 # among taxa
 # extract.residuals <- function(results){
 # }
 
-# Given a jSDM result (list), extracts the full sample of the marginal posterior taxon-specific parameters and returns a tidy data table
+# Given a jSDM result (list), returns the full sample of the marginal posterior taxon-specific parameters in tidy data table
 extract.beta <- function(results){
   # Get beta samples
   jsdm <- select.jsdm(results)
-  beta.samples <- melt(jsdm$beta_taxa) # Transform 3d array into 2d data.table
+  beta.samples <- melt(jsdm$beta.taxa) # Transform 3d array into 2d data.table
   
   # Get trial name
-  logic <- sapply(results, function(i){
-    class(i)[1]=="list"
+  ind <- sapply(results, function(i){
+    i$jSDM==TRUE
   })
-  beta.samples$Trial <- names(logic[logic])
+  ind <- unlist(ind)
+  
+  beta.samples$Trial <- names(ind)
   
   # Format the dataset
   colnames(beta.samples) <- c("Sample", "Variable", "Taxon", "Value", "Trial")
@@ -1316,7 +1849,7 @@ extract.beta <- function(results){
   return(beta.samples)
 }
 
-# Plot maps ####
+# Maps ####
 # Plot modelled probabilites across Switzerland given a run.isdm() output object
 map.isdm <- function(results, fileName) {
   pdf(paste(fileName, ".pdf", sep=''), paper = 'special', width = 10.5, onefile = TRUE)
@@ -2423,7 +2956,7 @@ map.inputs <- function(x, fileName) {
   dev.off()
 }
 
-# Plots: other ####
+# Other plots ####
 # Given output from extract.jsdm(), plot community and taxon-specific parameters (and priors)
 plot.comm <- function(results, filename){
   jsdm <- select.jsdm(results)
@@ -2440,7 +2973,6 @@ plot.comm <- function(results, filename){
   })
   alpha.taxon <- alpha.taxa[, names(which.min(alpha.sd))]
   ymax <- max(density(alpha.taxon)$y)
-  
   # mu_alpha_comm ~ normal(mu_alpha_comm_pripar,sigma_alpha_comm_pripar)
   prior <- density(rnorm(length(jsdm$lp__), mean=jsdm$mu_alpha_comm_pripar, sd=jsdm$sigma_alpha_comm_pripar))
   
