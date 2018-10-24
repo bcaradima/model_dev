@@ -35,7 +35,6 @@ inputs$taxonomy <- read.csv('inputs/invertebrates_taxonomy_2018-02-23.dat', sep=
 inputs$ch <- st_read("inputs/workspace.gdb", layer="switzerland", stringsAsFactors = F)
 inputs$ch <- filter(inputs$ch, NAME=="Schweiz")
 
-
 inputs$rivers.major <- st_read(dsn = "inputs/workspace.gdb", layer = "major_rivers", stringsAsFactors = F)
 inputs$lakes.major <- st_read(dsn = "inputs/workspace.gdb", layer = "major_lakes", stringsAsFactors = F)
 

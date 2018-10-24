@@ -1,5 +1,5 @@
 ### RESULTS: Paper 1 ####
-# Select potential explanatory variables
+# Variable selection ####
 K <- c("A10m", "A100m", "A1km", "A.EDO", "IAR", "TU.Dm", "TU.Cr", "LUD", "Urban", "UI", "F10m", "F100m", "F1km", "F.EDO","Forest", "FRI", "Temp", "FV", "WV", "BM", "Morph", "WW", "HP", "Temp2")
 
 predictors <- prepare.inputs(K, sample.bdms, center = TRUE)
@@ -40,6 +40,49 @@ predictors.trans <- rename(predictors.trans,
 
 write.csv(predictors.trans, 'outputs/predictors_transformed.csv', row.names=FALSE)
 
+### INDIVIDUAL MODELS ####
+# Description: this script selects influence factors, fits and validates the individual models, and outputs equivalent joint model workspaces using the deploy.jsdm() function. Most of these operations are purely for paper 1.
+
+# > Select influence factors ####
+# Predictors for paper 1 (BDM species)
+# K <- c("Temp", "Temp2", "FV", "F10m", "IAR", "Urban", "LUD")
+# predictors <- prepare.inputs(K, sample.bdms, center=TRUE)
+# write.csv(predictors, "outputs/predictors_p1.csv", row.names = F)
+
+# P2 variable selection ####
+# Predictors for variable selection per dataset (paper 2)
+# predictors.vs <- prepare.inputs(c("A10m","A100m","A1km","A.EDO","IAR","TU.Dm","TU.Cr","LUD","Urban","UI","F10m","F100m","F1km", "p_forest", "F.EDO","bFRI","FRI","Temp","FV","WV","BM","Morph","WW","HP","Temp2","Noise"), sample.bdmf, center = TRUE)
+# write.csv(predictors.vs, 'outputs/predictors_vs_bdmf.csv', row.names = F)
+# 
+# predictors.vs <- prepare.inputs(c("A10m","A100m","A1km","A.EDO","IAR","TU.Dm","TU.Cr","LUD","Urban","UI","F10m","F100m","F1km", "p_forest", "F.EDO","bFRI","FRI","Temp","FV","WV","BM","Morph","WW","HP","Temp2","Noise"), sample.bdms, center = TRUE)
+# write.csv(predictors.vs, 'outputs/predictors_vs_bdms.csv', row.names = F)
+# 
+# predictors.vs <- prepare.inputs(c("A10m","A100m","A1km","A.EDO","IAR","TU.Dm","TU.Cr","LUD","Urban","UI","F10m","F100m","F1km", "p_forest", "F.EDO","bFRI","FRI","Temp","FV","WV","BM","Morph","WW","HP","Temp2","Noise"), sample.invf, center = TRUE)
+# write.csv(predictors.vs, 'outputs/predictors_vs_invf.csv', row.names = F)
+# 
+# predictors.vs <- prepare.inputs(c("A10m","A100m","A1km","A.EDO","IAR","TU.Dm","TU.Cr","LUD","Urban","UI","F10m","F100m","F1km", "p_forest", "F.EDO","bFRI","FRI","Temp","FV","WV","BM","Morph","WW","HP","Temp2","Noise"), sample.invf.plat, center = TRUE)
+# write.csv(predictors.vs, 'outputs/predictors_vs_invfp.csv', row.names = F)
+
+# > Individual model calibration ####
+isdm <- run.isdm(sample.bdms, predictors, trace = FALSE)
+
+# How many models lowered the deviance?
+table(sapply(isdm$models, function(m){
+  m$deviance < m$null.deviance
+}))
+
+# How many taxa used optim?
+table(sapply(isdm$models, function(m){
+  m$optim
+}))
+
+# Extract beta/dev/prob ####
+isdm.beta <- isdm$parameters
+isdm.dev <- isdm$deviance
+isdm.prob <- isdm$probability
+
+### > k-fold cross-validation ####
+isdm.cv <- cv.isdm(predictors)
 # Transformations ####
 # Description: this script prepares the results for paper 1. It processes the joint model workspaces and combines the results with those of the individual models before producing various plots.
 # deploy.jsdm() ####
