@@ -11,12 +11,12 @@
 # - select() # select columns
 
 # Global parameters ####
-community       <- "train.csv"
+community       <- "community.csv"
 predictors      <- "predictors.csv"
 
 comm.corr       <- T
 site.effects    <- T
-n.latent        <- 1
+n.latent        <- 2
 lat.site        <- F
 
 generate.res    <- F
@@ -24,9 +24,9 @@ generate.res    <- F
 crossvalid      <- FALSE
 dir.modinp      <- "inputs"
 
-sampsize        <- 7000
+sampsize        <- 10000
 thin            <- 5
-n.chain         <- 4
+n.chain         <- 1
 prob.defpri     <- 0.02
 thresh.sig      <- 1
 fact.sd         <- 1
@@ -367,7 +367,6 @@ if ( site.effects )
 if ( comm.corr )
 {
   model.code <- paste(model.code,
-                      "//corr_comm ~ lkj_corr(2);\n",
                       "  corrfact_comm ~ lkj_corr_cholesky(2);\n",
                       sep="")
 }
@@ -411,7 +410,12 @@ if ( n.latent > 1 )
                         sep="")
   }
   model.code <- paste(model.code,
-                      "      x_lat[i,k] ~ normal(0,1);\n",
+                      "      if ( k==1 && i==11)\n",
+                      "        x_lat[i,k] ~ normal(0,1) T[0,];\n",
+                      "      else if (k==2 && i==13)\n",
+                      "        x_lat[i,k] ~ normal(0,1) T[0,];\n",
+                      "      else\n",
+                      "        x_lat[i,k] ~ normal(0,1);\n",
                       "    }\n",
                       "    for ( j in 1:n_taxa ) {\n",
                       "      beta_lat[k,j] ~ normal(0,sigma_beta_lat);\n",

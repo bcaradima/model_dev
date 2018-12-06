@@ -778,7 +778,7 @@ g1 <- map.jsdm.pred.taxon(jsdm.bdmf, "Baetidae", legend=FALSE)
 g2 <- map.jsdm.pred.taxon(jsdm.bdms, "Baetis_alpinus", legend=FALSE)
 g3 <- map.jsdm.pred.taxon(jsdm.bdms, "Baetis_rhodani", legend=FALSE)
 g4 <- map.jsdm.pred.taxon(jsdm.bdms, "Baetis_muticus", legend=FALSE)
-ggarrange(g.baetidae, g.alpinus, g.rhodani, g.muticus, ncol=2, nrow=2, common.legend = TRUE, legend="right")
+ggarrange(g1,g2,g3,g4, ncol=2, nrow=2, common.legend = TRUE, legend="right")
 
 pdf('P2 maps example taxa.pdf', width=13, height=9.5)
 plot_grid(g1,g2,g3,g4, labels=c("(a)", "(b)", "(c)", "(d)"), align="hv")

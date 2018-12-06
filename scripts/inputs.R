@@ -1,20 +1,5 @@
 ### INPUTS ####
 # Description: this script prepares the observations and input data. Pre-processing and sampling is performed for observations. Potential inputs for the models are also calculated.
-# Taxonomy ####
-inputs$taxonomy <- data.table(inputs$taxonomy)
-
-# Add missing taxonomic data for Drusus_manticola, Baetis_niger, Baetis_nexus
-species <- rbind(c("Arthropoda", "Insecta", "Trichoptera", "Limnephilidae", "Drusus", "monticola"), 
-                 c("Arthropoda", "Insecta", "Ephemeroptera", "Baetidae", "Baetis", "niger"),
-                 c("Arthropoda", "Insecta", "Ephemeroptera", "Baetidae", "Baetis", "nexus"))
-species <- data.table(species)
-colnames(species) <- c("Phylum", "Class", "Order", "Family", "Genus", "Species")
-inputs$taxonomy <- bind_rows(inputs$taxonomy, species)
-rm(species)
-
-# Modify $Species so it's identical to BDM column names
-inputs$taxonomy$Species <- ifelse(!is.na(inputs$taxonomy$Species), paste(inputs$taxonomy$Genus, inputs$taxonomy$Species, sep="_"), NA)
-
 # Invertebrate data ####
 # Select invertebrate columns of interest
 inv <- select(inv, SiteId, SampId, X, Y, Longitude, Latitude, MonitoringProgram, Altitude, Abundance, AbundanceClass, Phylum, Class, Order, Family, Genus, Species, Taxon, Day, Month, Year)
@@ -106,7 +91,7 @@ bdms <- bdms[!is.na(bdms$SiteId), ]
 # Drop two genera because the family occurs as well
 bdms <- select(bdms, -Silo, -Stactobia)
 
-# Set seed and sample (i.e., shuffle the data)
+# Set seed and sample (i.e., shuffle the samples)
 set.seed(2017)
 sample.bdms <- bdms[sample(nrow(bdms)),]
 

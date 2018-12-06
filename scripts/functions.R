@@ -53,9 +53,8 @@ rmse <- function(residuals){
 
 # Calculate the deviance for a taxon, given vectors of predicted probabilities and observations
 # Note: jSDM must calculate deviance by matrix
-deviance <- function(obs, pred){
-  # sum(-2*(obs*log(pred)+(1-obs)*log(1-pred)),na.rm=TRUE)
-  sum(-2*log(ifelse(test.y==1, test.p.null, 1-test.p.null)), na.rm = TRUE)
+deviance.function <- function(y, p){
+  sum(-2*log(ifelse(y==1, p, 1-p)), na.rm = TRUE)
 }
 
 # Logistic link function outputs probabilities, given linear predictor
@@ -133,8 +132,10 @@ labeller.species <- function(j){
 
 # Returns taxonomic level of a given taxon from BDMs
 # Note: does not work for pooled taxonomic datasets...
-taxon.rank <- function(taxon){
-  cat('Identify: ', taxon, '\n')
+taxon.rank <- function(taxon, print = TRUE){
+  if (print){
+    cat('Identify: ', taxon, '\n')
+  }
   levels <- c("Phylum", "Class", "Order", "Family", "Genus", "Species")
   hierarchy <- matrix(nrow=length(levels), ncol=length(levels))
   hierarchy <- lower.tri(hierarchy, diag = TRUE)
@@ -416,7 +417,7 @@ run.isdm <- function(cm, predictors, trace=FALSE, messages=TRUE) {
     res.dev <- m$deviance
     std.res.dev <- m$deviance/n.samples
     D2 <- (null.dev-res.dev)/null.dev
-    tibble(Taxon = j, null.deviance = null.dev, residual.deviance = res.dev, std.deviance = std.res.dev, n.samples = n.samples, n.present = n[j], D2 = D2, Model = "iSDM")
+    tibble(Taxon = j, Model = "iSDM", null.deviance = null.dev, residual.deviance = res.dev, std.deviance = std.res.dev, D2 = D2, n.samples = n.samples, n.present = n[j])
   })
   deviance <- bind_rows(deviance)
   
@@ -1084,7 +1085,7 @@ cv.jsdm <- function(directory = "outputs/paper 1 extensions", folder) {
                                  D2 = train.d,
                                  Type = "Training",
                                  Fold = fold,
-                                 Model = "jSDM",
+                                 Model = folder,
                                  Trial = folder,
                                  stringsAsFactors = F)
     
@@ -1155,8 +1156,10 @@ cv.jsdm <- function(directory = "outputs/paper 1 extensions", folder) {
     
     # Check if site effects are enabled AND latent variables are disabled (TT0)
     if (extensions$site.effects & !extensions$n.latent){
+      # z <- matrix(rep(alpha.taxa.maxpost,nrow(test.inputs)),nrow=nrow(test.inputs),byrow=TRUE) +
+      #   test.inputs%*%beta.taxa.maxpost + test.gamma
       z <- matrix(rep(alpha.taxa.maxpost,nrow(test.inputs)),nrow=nrow(test.inputs),byrow=TRUE) +
-        test.inputs%*%beta.taxa.maxpost + test.gamma
+        test.inputs%*%beta.taxa.maxpost
     }
     
     # Check if site effects are enabled AND latent variables are enabled (TT1-TTx)
@@ -1165,34 +1168,36 @@ cv.jsdm <- function(directory = "outputs/paper 1 extensions", folder) {
       # if n.latent == 1, then residual covariance matrix = beta_lat * t(beta_lat)
       # if n.latent > 1, then residual covariance matrix = t(beta_lat) * beta_lat
       
-      if (extensions$n.latent==1){
-        lv.sigma <- beta.lat.maxpost * t(beta.lat.maxpost)
-        # Check if latent variable is site- or sample-specific, sample accordingly
-        if (extensions$lat.site==1){
-          test.lv.sites <- rnorm(length(unique(test.sites)), mean = 0, sd = lv.sigma)
-          names(test.lv.sites) <- unique(test.lv.sites)
-          test.lv <- test.lv.sites[test.sites]
-        }
-        else if (extensions$lat.site==0){
-          test.lv <- rnorm(length(test.samples), mean = 0, sd = lv.sigma)
-        }
-      } 
-      # Calculate linear predictor for multiple latent variables
-      else if (extensions$n.latent > 1){
-        lv.sigma <- t(beta.lat.maxpost) %*% beta.lat.maxpost
-        # Check if latent variables are site- or sample-specific
-        if (extensions$lat.site==1){
-          test.lv.sites <- rmvnorm(length(unique(test.sites)), mean = rep(0, nrow(lv.sigma)), sigma = lv.sigma)
-          rownames(test.lv.sites) <- unique(test.sites)
-          test.lv <- test.lv.sites[test.sites,]
-        } 
-        else if (extensions$lat.site==0){
-          test.lv <- rmvnorm(length(test.samples), mean = rep(0, nrow(lv.sigma)), sigma = lv.sigma)
-        }
-      }
+      # if (extensions$n.latent==1){
+      #   lv.sigma <- beta.lat.maxpost * t(beta.lat.maxpost)
+      #   # Check if latent variable is site- or sample-specific, sample accordingly
+      #   if (extensions$lat.site==1){
+      #     test.lv.sites <- rnorm(length(unique(test.sites)), mean = 0, sd = lv.sigma)
+      #     names(test.lv.sites) <- unique(test.lv.sites)
+      #     test.lv <- test.lv.sites[test.sites]
+      #   }
+      #   else if (extensions$lat.site==0){
+      #     test.lv <- rnorm(length(test.samples), mean = 0, sd = lv.sigma)
+      #   }
+      # } 
+      # # Calculate linear predictor for multiple latent variables
+      # else if (extensions$n.latent > 1){
+      #   lv.sigma <- t(beta.lat.maxpost) %*% beta.lat.maxpost
+      #   # Check if latent variables are site- or sample-specific
+      #   if (extensions$lat.site==1){
+      #     test.lv.sites <- rmvnorm(length(unique(test.sites)), mean = rep(0, nrow(lv.sigma)), sigma = lv.sigma)
+      #     rownames(test.lv.sites) <- unique(test.sites)
+      #     test.lv <- test.lv.sites[test.sites,]
+      #   } 
+      #   else if (extensions$lat.site==0){
+      #     test.lv <- rmvnorm(length(test.samples), mean = rep(0, nrow(lv.sigma)), sigma = lv.sigma)
+      #   }
+      # }
       # Calculate linear predictor for all terms (fixed+site+latent terms)
+      # z <- matrix(rep(alpha.taxa.maxpost,nrow(test.inputs)),nrow=nrow(test.inputs),byrow=TRUE) +
+      #   test.inputs%*%beta.taxa.maxpost + test.gamma + test.lv
       z <- matrix(rep(alpha.taxa.maxpost,nrow(test.inputs)),nrow=nrow(test.inputs),byrow=TRUE) +
-        test.inputs%*%beta.taxa.maxpost + test.gamma + test.lv
+        test.inputs%*%beta.taxa.maxpost
     }
     
     p.maxpost <- 1/(1+exp(-z))
@@ -1228,7 +1233,7 @@ cv.jsdm <- function(directory = "outputs/paper 1 extensions", folder) {
                                 D2 = test.d, 
                                 Type = "Testing",
                                 Fold = fold,
-                                Model = "jSDM",
+                                Model = folder,
                                 Trial = folder,
                                 stringsAsFactors = F)
     
@@ -1263,144 +1268,467 @@ cv.jsdm <- function(directory = "outputs/paper 1 extensions", folder) {
   return(output)
 }
 
-# Calculate predicted probabilities over the full posterior (warning: very memory intensive)
-cv.jsdm.pred <- function(trials){
-  pred <- list()
-  # pred <- data.table()
-  for (t in 1:length(trials)){
-    trial <- trials[t]
-    for (k in 1:3){
-      model.image <- new.env()
-      path <- paste('outputs/jsdm_p1/jsdm_',trial,'_train', k, sep="")
-      load(paste(path, "/Inv_JSDM_D1.RData", sep = ""), envir = model.image)
-      
-      # Extract objects from workspace image to local environment
-      sites <- model.image$sites
-      samples <- model.image$samples
-      occur.taxa <- model.image$occur.taxa
-      env.cond <- model.image$env.cond
-      inf.fact <- model.image$inf.fact
-  
-      jsdm <- extract(model.image$res.D1,permuted=TRUE,inc_warmup=FALSE)
-      rm(model.image)
-      
-      # Name dimensions of beta^taxa array
-      dimnames(jsdm[["beta_taxa"]])[[1]] <- 1:dim(jsdm[["beta_taxa"]][,,])[1]
-      dimnames(jsdm[["beta_taxa"]])[[2]] <- inf.fact
-      dimnames(jsdm[["beta_taxa"]])[[3]] <- colnames(occur.taxa)
-      
-      # Name dimensions of alpha^taxa array
-      dimnames(jsdm[["alpha_taxa"]])[[1]] <- 1:nrow(jsdm[["alpha_taxa"]])
-      dimnames(jsdm[["alpha_taxa"]])[[2]] <- colnames(occur.taxa)
-      
-      beta.taxa <- jsdm[["beta_taxa"]]
-      alpha.taxa <- jsdm[["alpha_taxa"]]
-      
-      # PREDICTION: Prepare the predictive samples and inputs
-      obs.test <- read.csv(paste(path, '/inputs/test', k, '.csv', sep = ''), header = TRUE, stringsAsFactors = F)
-      predictors <- read.csv(paste(path, "/inputs/predictors.csv", sep = ""), header = TRUE, sep = ',', stringsAsFactors = F)
-      
-      # Drop taxa that do not occur in training data
-      obs.test <- obs.test[, c("SiteId", "SampId", colnames(occur.taxa))]
-      # Join predictors to test observations
-      predictors.test <- left_join(obs.test[, c("SiteId", "SampId")], predictors, by=c("SiteId", "SampId"))
-      
-      # Drop rows in obs.test and predictors.test where the latter has any NAs
-      ind <- !apply(is.na(predictors.test[,inf.fact]),1,FUN=any)
-      ind <- ifelse(is.na(ind),FALSE,ind)
-      predictors.test <- predictors.test[ind, ]
-      test.obs <- test.obs[ind, ]
-      rm(ind)
-      
-      # PREDICTION: Propogate posterior taxon-specific parameter distributions
-      # through the joint model
-      
-      # Transpose matrix of inputs (without ID columns)
-      X <- t(as.matrix(predictors.test[, inf.fact]))
-      
-      # Initialize array of dimensions s (samples),i (sites),j ()
-      # For each taxon, compute x_ik*beta_jk
-      m <- array(
-        apply(beta.taxa, 3, function(beta.K){
-          beta.K %*% X
-        }), 
-        dim=c(dim(beta.taxa)[1], nrow(predictors.test), dim(beta.taxa)[3])
-        # e.g., dim=c(10000, 580, 245) for full community
-      )
-      rm(beta.taxa); gc() # recover memory
-      
-      # Calculate predicted probabilities through the link function
-      # dimensions s, j, i
-      pred.fold <- array(
-        apply(m, 2, function(xb){
-          link.function(alpha.taxa + xb)
-        }),
-        dim=c(nrow(alpha.taxa), ncol(alpha.taxa), nrow(predictors.test))
-        # e.g., dim=c(10000, 245, 580) for full community
-      )
-      rm(m, alpha.taxa); gc() # recover memory
-      
-      dimnames(pred.fold)[[1]] <- 1:dim(pred.fold)[1]
-      dimnames(pred.fold)[[2]] <- colnames(occur.taxa)
-      dimnames(pred.fold)[[3]] <- predictors.test$SampId
-      
-      pred.fold <- melt(pred.fold)
-      setDT(pred.fold)
-      colnames(pred.fold) <- c("Sample", "Taxon", "SampId", "Pred")
-      pred.fold <- select(pred.fold, Taxon, SampId, Pred)
-      
-      # Append results and print output
-      pred[[paste("fold",k,sep="")]] <- pred.fold
-      # pred <- bind_rows(pred, pred.fold)
-      rm(pred.fold)
-      cat("Fold completed:", k, "\n")
-    }
-  }
-  gc()
-  return(pred)
+# Cross-validation of mSDMs and jSDMs based on sampling the posterior
+# directory = "outputs/paper 1 extensions"
+# folder = "FF0"
+# fold = 1
+# k=1
 
-  # # Initialize array of dimensions s,i,k
-  # X <- t(X) # transpose X prior to using it in apply()
-  # # For each taxon, compute x*beta for each posterior sample, site, and variable
-  # m <- array(
-  #   apply(beta.taxa, 3, function(beta.K){
-  #   beta.K %*% X
-  #     }), 
-  #   dim=c(10000, 580, 245)
-  # )
-  # 
-  # gc()
-  # 
-  # # For each site, compute the probabilities
-  # predictions <- array(
-  #   apply(m, 2, function(x.beta){
-  #     link.function(alpha.taxa + x.beta)
-  #   }),
-  #   dim=c(10000, 245, 580)
-  # )
+cv.jsdm.sample <- function(directory = "outputs/paper 1 extensions", folder) {
+  require(mvtnorm)
+  # output = list("deviance" = tibble(), "probability" = tibble(), "richness" = tibble())
+  output = list("deviance" = tibble(), "richness" = tibble())
   
-  # Parallelized implementation of probabilistic predictions in JSDM
-  # library(snow)
-  # cl <- makeCluster(4,type="SOCK")
-  # clusterExport(cl, list="X", envir = .GlobalEnv)
-  # m <- array(
-  #   parApply(cl=cl, beta.taxa, MARGIN=3, function(beta.K){
-  #     beta.K %*% X
-  #   }), 
-  #   dim=c(10000, 580, 245)
-  # )
-  # stopCluster(cl)
-  # 
-  # cl <- makeCluster(4,type="SOCK")
-  # clusterExport(cl, list="alpha.taxa", envir = .GlobalEnv)
-  # 
-  # predictions <- array(
-  #   parApply(cl=cl, m, 2, function(x.beta){
-  #     link.function(alpha.taxa + x.beta)
-  #   }),
-  #   dim=c(10000, 245, 580)
-  # )
-  # stop.cluster(cl)
+  for (fold in 1:3){
+    cat("fold ", fold, "-> | ")
+    model.image <- new.env()
+    
+    full.path <- paste(getwd(), directory, paste(folder,'_train', fold, sep=""), sep="/")
+    extensions <- identify.jsdm(full.path)
+    load(paste(full.path, extensions$workspace, sep="/"), envir = model.image)
+    
+    # Read additional data for testing (assumed to be in /inputs)
+    test.y <- read.csv(paste(full.path, '/inputs/test', fold, '.csv', sep=""), header = TRUE, stringsAsFactors = F)
+    predictors <- read.csv(paste(full.path, '/inputs/predictors.csv', sep=""), header = TRUE, sep = ',', stringsAsFactors = F)
+    
+    # Stanfit object
+    res <- model.image$res
+    
+    # Extract the modified stanfit object
+    res.extracted       <- rstan::extract(res,permuted=TRUE,inc_warmup=FALSE)
+    
+    # Extract objects from workspace image and stanfit object
+    train.sites <- model.image$sites # sites with complete predictors and non-zero taxa included in Stan model
+    train.samples <- model.image$samples
+    inf.fact <- model.image$inf.fact # influence factors included in Stan model
+    
+    # Name dimensions of parameters within stanfit object
+    dimnames(res.extracted[["beta_taxa"]]) <- list(1:dim(res.extracted[["beta_taxa"]][,,])[1], inf.fact, colnames(model.image$occur.taxa))
+    colnames(res.extracted[["alpha_taxa"]]) <- colnames(model.image$occur.taxa)
+    
+    colnames(res.extracted[["mu_beta_comm"]]) <- inf.fact
+    colnames(res.extracted[["sigma_beta_comm"]]) <- inf.fact
+    
+    # Extract parameters at maximum posterior
+    ind.maxpost <- which.max(res.extracted[["lp__"]])
+    mu.alpha.comm.maxpost <- res.extracted[["mu_alpha_comm"]][ind.maxpost]
+    sigma.alpha.comm.maxpost <- res.extracted[["sigma_alpha_comm"]][ind.maxpost]
+    mu.beta.comm.maxpost  <- res.extracted[["mu_beta_comm"]][ind.maxpost,]
+    sigma.beta.comm.maxpost  <- res.extracted[["sigma_beta_comm"]][ind.maxpost,]
+    alpha.taxa.maxpost <- res.extracted[["alpha_taxa"]][ind.maxpost,]
+    beta.taxa.maxpost  <- res.extracted[["beta_taxa"]][ind.maxpost,,]
+    
+    # Name dimensions of maximum posterior community parameters
+    names(mu.beta.comm.maxpost) <- inf.fact
+    names(sigma.beta.comm.maxpost) <- inf.fact
+    rownames(beta.taxa.maxpost) <- inf.fact
+    
+    # Extract observations and inputs for calibration
+    train.x <- as.matrix(model.image$env.cond[,inf.fact])
+    colnames(train.x) <- inf.fact
+    train.y <- as.matrix(model.image$occur.taxa)
+    
+    # Match positions of site-samples to unique sites
+    train.unique.sites <- unique(train.sites)
+    train.siteIND <- match(train.sites, train.unique.sites) 
+    
+    # Extraction ####
+    # Extract full posterior results
+    data <- model.image$data
+    alpha           <- res.extracted$alpha_taxa
+    dimnames(alpha) <- list(rep("",dim(alpha)[1]),colnames(data$y))
+    beta            <- res.extracted$beta_taxa
+    dimnames(beta)  <- list(rep("",dim(beta)[1]),colnames(data$x),colnames(data$y))
+    gamma           <- res.extracted$gamma_site
+    sigma.gamma     <- res.extracted$sigma_gamma
+    x.lat           <- res.extracted$x_lat
+    beta.lat        <- res.extracted$beta_lat
+    cat("Extract -> | ")
+    
+    # Calculate number of sites, samples, and occurrences and samples per taxon
+    train.n.sites <- length(unique(train.sites))
+    train.n.samples <- length(unique(train.samples))
+    train.n.taxa <- ncol(train.y)
+    
+    train.n.present <- apply(train.y, 2, sum, na.rm = TRUE)
+    train.n.sample.taxa <- apply(train.y, 2, function(j){sum(!is.na(j))})
+    
+    # Prepare testing observations and inputs
+    # Drop taxa that do not occur in training data
+    test.y <- test.y[, c("SiteId", "SampId", names(train.n.present))]
+    # Join predictors to test observations
+    test.predictors <- left_join(test.y[, c("SiteId", "SampId")], predictors, by=c("SiteId", "SampId"))
+    
+    # Drop rows in y.test and predictors.test where the latter has any NAs
+    ind <- !apply(is.na(test.predictors[,inf.fact]),1,FUN=any)
+    ind <- ifelse(is.na(ind),FALSE,ind)
+    test.predictors <- test.predictors[ind, ]
+    test.y <- test.y[ind, ]
+    
+    # Keep the test sites
+    test.sites <- test.predictors$SiteId
+    test.samples <- test.predictors$SampId
+    names(test.sites) <- test.samples
+    
+    # Convert test data to matrix
+    test.y <- select(test.y, -SiteId, -SampId)
+    test.y <- as.matrix(test.y)
+    
+    test.unique.sites <- unique(test.sites)
+    test.siteIND <- match(test.sites, test.unique.sites) 
+    
+    # Drop the test sites and keep the inputs
+    test.x <- as.matrix(test.predictors[, inf.fact])
+    
+    test.n.sites <- length(unique(test.sites))
+    test.n.samples <- length(unique(test.samples))
+    test.n.taxa <- ncol(test.y)
+    test.n.present <- apply(test.y, 2, sum, na.rm=TRUE)
+    test.n.sample.taxa <- apply(test.y, 2, function(j){sum(!is.na(j))})
+    
+    thin.eval <- 5
+    ind.sel.eval <-  thin.eval*(1:floor(dim(alpha)[1]/thin.eval))
+    sampsize.eval <- length(ind.sel.eval)
+    
+    # Calculate null probabilities and deviances 
+    # Same for all posterior samples? presumably yes, since no posterior parameter distributions are involved)
+    train.p.null <- apply(train.y, 2, function(j){sum(j, na.rm=TRUE)/sum(!is.na(j))})
+    train.p.null <- ifelse(train.p.null==0,1e-4,train.p.null)
+    train.p.null <- matrix(rep(train.p.null,nrow(train.y)),nrow=nrow(train.y),byrow=TRUE)
+    
+    test.p.null <- apply(test.y, 2, function(j){sum(j, na.rm=TRUE)/sum(!is.na(j))})
+    test.p.null <- ifelse(test.p.null==0,1e-4,test.p.null)
+    test.p.null <- matrix(rep(test.p.null,nrow(test.y)),nrow=nrow(test.y),byrow=TRUE)
+    
+    # Pre-allocation ####
+    cov.resid  <- array(0,dim=c(sampsize.eval,train.n.taxa,train.n.taxa))
+    train.z <- array(dim=c(sampsize.eval,train.n.samples,train.n.taxa),dimnames=list(ind.sel.eval,1:dim(data$y)[1],dimnames(data$y)[[2]]))
+    test.z <- array(dim=c(sampsize.eval,test.n.samples,test.n.taxa),dimnames=list(ind.sel.eval, 1:dim(test.y)[1],dimnames(test.y)[[2]]))
+    train.p <- train.z
+    test.p <- test.z
+    
+    # Pre-allocation for training data structures
+    train.deviance.null <- matrix(data = -2*sum(train.y*log(train.p.null)+(1-train.y)*log(1-train.p.null), na.rm = T),
+                                  nrow=nrow(train.y), ncol=ncol(train.y))
+    train.deviance.null.taxa <- -2*apply(train.y*log(train.p.null)+(1-train.y)*log(1-train.p.null),2,sum,na.rm=T)
+    
+    train.deviance.resid <- array(dim=c(length(ind.sel.eval), nrow(train.y), ncol(train.y)), dimnames = list(ind.sel.eval, train.samples, colnames(train.y)))
+    
+    train.deviance.resid.taxa <- matrix(data = NA, nrow=length(ind.sel.eval), ncol=ncol(train.y))
+    colnames(train.deviance.resid.taxa) <- colnames(train.y)
+    
+    train.std.deviance <- matrix(data = NA, nrow=length(ind.sel.eval), ncol=ncol(train.y))
+    colnames(train.std.deviance) <- colnames(train.y)
+    
+    train.d <- matrix(data = NA, nrow=length(ind.sel.eval), ncol=ncol(train.y))
+    colnames(train.d) <- colnames(train.y)
+    
+    # Pre-allocation for testing data structures
+    test.deviance.null <- matrix(data = -2*sum(test.y*log(test.p.null)+(1-test.y)*log(1-test.p.null), na.rm = T),
+                                 nrow=nrow(test.y), ncol=ncol(test.y))
+    test.deviance.null.taxa <- -2*apply(test.y*log(test.p.null)+(1-test.y)*log(1-test.p.null),2,sum,na.rm=T)
+    
+    test.deviance.resid <- array(dim=c(length(ind.sel.eval), nrow(test.y), ncol(test.y)), dimnames = list(ind.sel.eval, test.samples, colnames(test.y)))
+    test.deviance.resid.taxa <- matrix(data = NA, nrow=length(ind.sel.eval), ncol=ncol(test.y))
+    colnames(test.deviance.resid.taxa) <- colnames(test.y)
+    
+    test.std.deviance <- matrix(data = NA, nrow=length(ind.sel.eval), ncol=ncol(test.y))
+    colnames(test.std.deviance) <- colnames(test.y)
+    
+    test.d <- matrix(data = NA, nrow=length(ind.sel.eval), ncol=ncol(test.y))
+    colnames(test.d) <- colnames(train.y)
+    
+    train.y.pred <- train.z
+    dimnames(train.y.pred)[[2]] <- train.samples
+    dimnames(train.y.pred)[[3]] <- colnames(train.y)
+    
+    test.y.pred <- test.z
+    dimnames(test.y.pred)[[2]] <- test.samples
+    dimnames(test.y.pred)[[3]] <- colnames(test.y)
+    
+    # Begin sampling ####
+    cat("\nsampling                                                   v\n") # "v" marks end of sampling
+    for ( k in 1:sampsize.eval ){
+      if ( k %% floor(sampsize.eval/50) == 0 ) cat("*")
+      # calculate z = \alpha + x*\beta
+      train.z[k,,] <- matrix(rep(alpha[ind.sel.eval[k],],train.n.samples),byrow=TRUE,nrow=train.n.samples) +
+        train.x %*% beta[ind.sel.eval[k],,]
+      
+      test.z[k,,] <- matrix(rep(alpha[ind.sel.eval[k],],test.n.samples),byrow=TRUE,nrow=test.n.samples) +
+        test.x %*% beta[ind.sel.eval[k],,]
+      
+      # add the site effect
+      if ( !is.null(gamma) ){
+        g <- gamma[ind.sel.eval[k], train.siteIND]
+        train.z[k,,] <- train.z[k,,] + matrix(rep(g,train.n.taxa),byrow=FALSE,nrow=train.n.samples)
+        test.z[k,,] <- test.z[k,,] + matrix(rep(rnorm(test.n.samples,0,sigma.gamma[ind.sel.eval[k]]),test.n.taxa),byrow=FALSE,nrow=test.n.samples)
+      }
+      
+      # add latent variable(s)
+      if ( !is.null(x.lat) ){
+        if ( extensions$n.latent == 1 ){
+          cov.resid[k,,]  <- beta.lat[ind.sel.eval[k],] %*% t(beta.lat[ind.sel.eval[k],])
+        } else{
+          cov.resid[k,,]  <- t(beta.lat[ind.sel.eval[k],,]) %*% beta.lat[ind.sel.eval[k],,]
+        }
+        # site-specific latent variables
+        if ( dim(x.lat)[2] < train.n.samples ){ # test if latent variable is site- or sample-specific
+          if ( extensions$n.latent == 1 ){
+            train.z[k,,] <- train.z[k,,] + x.lat[ind.sel.eval[k], train.siteIND] %*% t(beta.lat[ind.sel.eval[k],])
+          } else{
+            train.z[k,,] <- train.z[k,,] + x.lat[ind.sel.eval[k], train.siteIND,] %*% beta.lat[ind.sel.eval[k],,]
+          }
+          # sample-specific latent variables
+        } else{
+          if ( extensions$n.latent == 1 ){
+            train.z[k,,] <- train.z[k,,] + x.lat[ind.sel.eval[k],] %*% beta.lat[ind.sel.eval[k],]
+          } else{
+            train.z[k,,] <- train.z[k,,] + x.lat[ind.sel.eval[k],,] %*% beta.lat[ind.sel.eval[k],,]
+          }
+        }
+        for ( i in 1:test.n.samples ){
+          test.z[k,i,] <- test.z[k,i,] + rmvnorm(1, sigma=cov.resid[k,,])
+        }
+      }
+      
+      train.p[k,,] <- 1 / (1 + exp(-train.z[k,,]))
+      test.p[k,,] <- 1 / (1 + exp(-test.z[k,,]))
+      
+      # results: training deviance ####
+      # Calculate deviance of the proposed model for posterior sample
+      train.deviance.resid[k,,] <- sign(train.y-0.5)*sqrt(-2*(train.y*log(train.p[k,,])+(1-train.y)*log(1-train.p[k,,])))
+      # dim(train.deviance.resid): 180, 387, 233
+      
+      # Calculate the sum of the squared residual deviances for all taxa
+      # dim(train.deviance.resid.taxa): 180, 233
+      train.deviance.resid.taxa[k, ] <- apply(train.deviance.resid[k,,]^2, 2, sum, na.rm=TRUE)
+      
+      # Calculate standardized deviance and D^2
+      train.std.deviance[k,] <- train.deviance.resid.taxa[k,]/train.n.samples
+      train.d[k,] <- 1-train.deviance.resid.taxa[k,]/train.deviance.null.taxa
+      
+      # results: testing deviance ####
+      # Calculate deviance of the proposed model for posterior sample
+      test.deviance.resid[k,,] <- as.matrix(sign(test.y-0.5)*sqrt(-2*(test.y*log(test.p[k,,])+(1-test.y)*log(1-test.p[k,,]))))
+      # dim(test.deviance.resid): 180, 387, 233
+      
+      # Calculate the sum of the squared residual deviances for all taxa
+      # dim(test.deviance.resid.taxa): 180, 233
+      test.deviance.resid.taxa[k, ] <- apply(test.deviance.resid[k,,]^2, 2, sum, na.rm=TRUE)
+      
+      # Calculate standardized deviance and D^2
+      test.std.deviance[k,] <- test.deviance.resid.taxa[k,]/test.n.samples
+      test.d[k,] <- 1-test.deviance.resid.taxa[k,]/test.deviance.null.taxa
+      
+      # Richness ####
+      for ( j in 1:train.n.taxa ){
+        train.y.pred[k,,j] <- ifelse(runif(train.n.samples) < train.p[k,,j],1,0) 
+        ind.avail <- data$y[,j] >= 0
+        # train.deviance[j] <- train.deviance[j] - 2*sum(data$y[ind.avail,j]*log(train.p[k,ind.avail,j])+
+        #                                      (1-data$y[ind.avail,j])*log(1-train.p[k,ind.avail,j]))
+      }
+      for ( j in 1:test.n.taxa){
+        test.y.pred[k,,j] <- ifelse(runif(test.n.samples) < test.p[k,,j],1,0)
+        ind.avail <- data$y[,j] >= 0
+        # test.deviance[j] <- test.deviance[j] - 2*sum(test.y[ind.avail,j]*log(test.p[k,ind.avail,j])+
+        #                                                (1-test.y[ind.avail,j])*log(1-test.p[k,ind.avail,j]))
+      }
+    }
+    cat("\n\n")
+    
+    # results: richness ####
+    train.obs <- train.y %>%
+      as.tibble() %>%
+      mutate(SiteId = train.sites, SampId = train.samples) %>%
+      gather(Taxon, Obs, -SiteId, -SampId)
+    
+    test.obs <- test.y %>%
+      as.tibble() %>%
+      mutate(SiteId = test.sites, SampId = test.samples) %>%
+      gather(Taxon, Obs, -SiteId, -SampId)
+    
+    # Get taxonomic resolution and taxonomy of taxa in training data:
+    # - Assumes setup.R has pre-processed inputs$taxonomy data
+    # - Assumes taxon.rank() function defined in functions.R is in global environment
+    taxonomic.resolution <- lapply(dimnames(train.y.pred)[[3]], function(j){
+      taxon.rank(j, print = FALSE)
+    })
+    taxonomic.resolution <- bind_rows(taxonomic.resolution)
+    
+    species <- taxonomic.resolution$Taxon[taxonomic.resolution$Rank=="Species"]
+    families <- taxonomic.resolution$Taxon[taxonomic.resolution$Rank=="Family" | taxonomic.resolution$Rank=="Genus" | taxonomic.resolution$Rank=="Species"]
+    
+    # richness (species) ####
+    # Calculate observed species richness
+    train.y.obs.species.richness <- train.obs %>%
+      as.tibble() %>%
+      filter(Taxon %in% species) %>%
+      group_by(SampId) %>%
+      summarise(obs.richness = sum(Obs, na.rm = TRUE))
+    
+    test.y.obs.species.richness <- test.obs %>%
+      as.tibble() %>%
+      filter(Taxon %in% species) %>%
+      group_by(SampId) %>%
+      summarise(obs.richness = sum(Obs, na.rm = TRUE))
+    
+    # # Calculate predicted richness (training)
+    train.y.pred.species.richness <- train.y.pred %>%
+      # Melt and format the predicted realizations
+      melt() %>%
+      as.tibble() %>%
+      rename("posterior.sample" = "Var1", "SampId" = "Var2", "Taxon" = "Var3", "richness" = "value") %>%
+      # Keep only taxa identified at species-level
+      filter(Taxon %in% species) %>%
+      group_by(posterior.sample, SampId) %>%
+      # Calculate the realized predicted richness during training
+      summarise(total.pred.richness = sum(richness)) %>%
+      mutate(Type = "Training", Fold = fold, Trial = folder, Rank = "Species") %>%
+      ungroup() %>%
+      left_join(train.y.obs.species.richness, by="SampId")
+    
+    # Calculate predicted realized richness (testing)
+    test.y.pred.species.richness <- test.y.pred %>%
+      # Melt and format the predicted realizations
+      melt() %>%
+      as.tibble() %>%
+      rename("posterior.sample" = "Var1", "SampId" = "Var2", "Taxon" = "Var3", "richness" = "value") %>%
+      # Keep only taxa identified at species-level
+      filter(Taxon %in% species) %>%
+      group_by(posterior.sample, SampId) %>%
+      # Calculate the realized predicted species richness during testing
+      summarise(total.pred.richness = sum(richness)) %>%
+      mutate(Type = "Testing", Fold = fold, Trial = folder, Rank = "Species") %>%
+      ungroup() %>%
+      left_join(test.y.obs.species.richness, by="SampId")
+    
+    species.richness <- bind_rows(train.y.pred.species.richness, test.y.pred.species.richness)
+    # Delete redundant objects
+    rm(train.y.obs.species.richness, test.y.obs.species.richness, train.y.pred.species.richness, test.y.pred.species.richness)
+    
+    # richness (family) ####
+    # Calculate observed family richness (training)
+    train.y.obs.family.richness <- train.obs %>%
+      as.tibble() %>%
+      filter(Obs == 1 & Taxon %in% families) %>%
+      left_join(taxonomic.resolution, by="Taxon") %>%
+      group_by(SampId) %>%
+      summarise(obs.richness = uniqueN(Family))
+    
+    # Calculate observed family richness (testing)
+    test.y.obs.family.richness <- test.obs %>%
+      as.tibble() %>%
+      filter(Obs == 1 & Taxon %in% families) %>%
+      left_join(taxonomic.resolution, by="Taxon") %>%
+      group_by(SampId) %>%
+      summarise(obs.richness = uniqueN(Family))
+    
+    # Calculate predicted realized family richness (training)
+    train.y.pred.family.richness <- train.y.pred %>%
+      # Melt and format the predicted realizations
+      melt() %>%
+      as.tibble() %>%
+      rename("posterior.sample" = "Var1", "SampId" = "Var2", "Taxon" = "Var3", "richness" = "value") %>%
+      # Keep only taxa identified at species-level
+      filter(richness==1 & Taxon %in% families) %>%
+      left_join(taxonomic.resolution, by="Taxon") %>%
+      group_by(posterior.sample, SampId) %>%
+      # Calculate the realized predicted richness during training
+      summarise(total.pred.richness = sum(richness)) %>%
+      mutate(Type = "Training", Fold = fold, Trial = folder, Rank = "Family") %>%
+      ungroup() %>%
+      left_join(train.y.obs.family.richness, by="SampId")
+    
+    # Calculate predicted realized family richness (testing)
+    test.y.pred.family.richness <- test.y.pred %>%
+      # Melt and format the predicted realizations
+      melt() %>%
+      as.tibble() %>%
+      rename("posterior.sample" = "Var1", "SampId" = "Var2", "Taxon" = "Var3", "richness" = "value") %>%
+      # Keep only taxa identified at species-level
+      filter(richness==1 & Taxon %in% families) %>%
+      left_join(taxonomic.resolution, by="Taxon") %>%
+      group_by(posterior.sample, SampId) %>%
+      # Calculate the realized predicted richness during training
+      summarise(total.pred.richness = sum(richness)) %>%
+      mutate(Type = "Testing", Fold = fold, Trial = folder, Rank = "Family") %>%
+      ungroup() %>%
+      left_join(test.y.obs.family.richness, by="SampId")
+    
+    family.richness <- bind_rows(train.y.pred.family.richness, test.y.pred.family.richness)
+    output$richness <- bind_rows(output$richness, family.richness)
+    output$richness <- bind_rows(output$richness, species.richness)
+    
+    rm(richness)
+    
+    # # results: probability ####
+    # dimnames(train.p)[[2]] <- train.samples
+    # train.probability <- train.p %>%
+    #   melt() %>%
+    #   as.tibble() %>%
+    #   rename("posterior.sample" = "Var1", "SampId" = "Var2", "Taxon" = "Var3", "Pred" = "value") %>%
+    #   mutate(Taxon = as.factor(Taxon), SampId = as.factor(SampId), Fold = fold, Trial = as.factor(folder), Type = "Training") %>%
+    #   left_join(train.obs, by=c("Taxon", "SampId"))
+    # rm(train.obs)
+    # 
+    # dimnames(test.p)[[2]] <- test.samples
+    # test.probability <- test.p %>%
+    #   melt() %>%
+    #   as.tibble() %>%
+    #   rename("posterior.sample" = "Var1", "SampId" = "Var2", "Taxon" = "Var3", "Pred" = "value") %>%
+    #   mutate(Taxon = as.factor(Taxon), SampId = as.factor(SampId), Fold = fold, Trial = as.factor(folder), Type = "Testing") %>%
+    #   left_join(test.obs, by=c("Taxon", "SampId"))
+    # rm(test.obs)
+    # 
+    # output$probability <- bind_rows(output$probability, train.probability, test.probability)
+    # 
+    # output$probability$ind.sel.eval <- ind.sel.eval[output$probability$posterior.sample]
+    
+    # results: deviance ####
+    # *.deviance.null.taxa : null deviance per taxon
+    # *.deviance.resid.taxa : residual deviance per taxon
+    # *.std.deviance: standardized residual deviance per taxon
+    train.deviance1 <- melt(train.deviance.resid.taxa)
+    colnames(train.deviance1) <- c("posterior.sample", "Taxon", "residual.deviance")
+    
+    train.deviance2 <- melt(train.std.deviance)
+    colnames(train.deviance2) <- c("posterior.sample", "Taxon", "std.deviance")
+    
+    train.deviance <- left_join(train.deviance1, train.deviance2, by=c("posterior.sample", "Taxon"))
+    train.deviance$Type <- "Training"
+    train.deviance$null.deviance <- train.deviance.null.taxa[train.deviance$Taxon]
+    train.deviance$Fold <- fold
+    train.deviance$Trial <- folder
+    train.deviance$D2 <- train.d[train.deviance$Taxon]
+    train.deviance$n.present <- train.n.present[train.deviance$Taxon]
+    train.deviance$n.samples <- train.n.samples[train.deviance$Taxon]
+    rm(train.deviance1, train.deviance2)
+    
+    test.deviance1 <- melt(test.deviance.resid.taxa)
+    colnames(test.deviance1) <- c("posterior.sample", "Taxon", "residual.deviance")
+    
+    test.deviance2 <- melt(test.std.deviance)
+    colnames(test.deviance2) <- c("posterior.sample", "Taxon", "std.deviance")
+    
+    test.deviance <- left_join(test.deviance1, test.deviance2, by=c("posterior.sample", "Taxon"))
+    test.deviance$Type <- "Testing"
+    test.deviance$null.deviance <- test.deviance.null.taxa[test.deviance$Taxon]
+    test.deviance$Fold <- fold
+    test.deviance$Trial <- folder
+    test.deviance$D2 <- test.d[test.deviance$Taxon]
+    test.deviance$n.present <- test.n.present[test.deviance$Taxon]
+    test.deviance$n.samples <- test.n.samples[test.deviance$Taxon]
+    rm(test.deviance1, test.deviance2)
+    
+    deviance <- bind_rows(train.deviance, test.deviance)
+    deviance$ind.sel.eval <- ind.sel.eval[deviance$posterior.sample]
+    
+    output$deviance <- bind_rows(output$deviance, deviance)
+    # output$deviance[[fold]] <- deviance
+    
+    cat('Trial / fold: ', folder, "/", fold, '\n')
+  }
+  return(output)
 }
 
 # Process models ####
@@ -1412,37 +1740,46 @@ identify.jsdm <- function(full.path){
   files <- list.files(full.path)
   workspace <- files[endsWith(files, ".RData")] # failure point: assumes one .RData file
   
-  # Identify the individual joint model extensions
-  extensions <- gsub(".RData|Inv_JSDM_", "", workspace)
-  extensions <- strsplit(extensions, "_")
-  
-  # Check for community parameter correlations
-  if ("corr" %in% extensions[[1]]){
-    correlations <- 1
-  } else if ("nocorr" %in% extensions[[1]]){
+  if (workspace != "Inv_JSDM_D1.RData"){
+    # Identify the individual joint model extensions
+    extensions <- gsub(".RData|Inv_JSDM_", "", workspace)
+    extensions <- strsplit(extensions, "_")
+    
+    # Check for community parameter correlations
+    if ("corr" %in% extensions[[1]]){
+      correlations <- 1
+    } else if ("nocorr" %in% extensions[[1]]){
+      correlations <- 0
+    }
+    
+    # Check for site-specific effects
+    if ("site" %in% extensions[[1]]){
+      site.effect <- 1
+    } else if ("nosite" %in% extensions[[1]]){
+      site.effect <- 0
+    }
+    
+    # Check for latent variables and number of latent variables
+    latvar <- strsplit(extensions[[1]][3], "latvar")
+    if ("no" %in% latvar){
+      n.latent <- 0
+    } else  if (latvar[[1]][1] > 0){
+      n.latent <- as.integer(latvar[[1]][1])
+    }
+    
+    # Check if latent variables are by site or by sample
+    if ("samp" %in% latvar[[1]][2]){
+      lat.site <- 0
+    } else {
+      lat.site <- 1
+    }
+    
+  } else if (workspace=="Inv_JSDM_D1.RData"){
+    cat("res.D1\n")
     correlations <- 0
-  }
-  
-  # Check for site-specific effects
-  if ("site" %in% extensions[[1]]){
-    site.effect <- 1
-  } else if ("nosite" %in% extensions[[1]]){
     site.effect <- 0
-  }
-  
-  # Check for latent variables and number of latent variables
-  latvar <- strsplit(extensions[[1]][3], "latvar")
-  if ("no" %in% latvar){
     n.latent <- 0
-  } else  if (latvar[[1]][1] > 0){
-    n.latent <- as.integer(latvar[[1]][1])
-  }
-  
-  # Check if latent variables are by site or by sample
-  if ("samp" %in% latvar[[1]][2]){
     lat.site <- 0
-  } else {
-    lat.site <- 1
   }
   
   model.info <- list("workspace" = workspace,
@@ -1457,7 +1794,7 @@ identify.jsdm <- function(full.path){
 # into one output (list of tidy data tables and model results)
 extract.jsdm <- function(directory = 'outputs/paper 1 extensions', folder) {
   # Store multiple model data results
-  output <- list("deviance" = data.table(), "probability" = data.table(), "parameters" = data.table())
+  output <- list("deviance" = tibble(), "probability" = tibble(), "parameters" = tibble())
   
   cat("Load image: ", folder, " -> | ")
   
@@ -1468,132 +1805,22 @@ extract.jsdm <- function(directory = 'outputs/paper 1 extensions', folder) {
   
   cat("Extract -> | ")
   # Stanfit object
-  res <- model.image$res
   
-  # Peter's code START:
-  # correct chains for multiple local maxima of latent variables:
-  res.orig <- res
-  res.extracted.trace1 <- extract(res,permuted=FALSE,inc_warmup=FALSE)
-  
-  n.latent <- extensions$n.latent
-  n.chain <- model.image$n.chain
-  if ( extensions$n.latent > 0 ){
-    name.x        <- "x_lat"
-    name.beta     <- "beta_lat"
-    parnames      <- names(res@sim$samples[[1]])
-    ind.x         <- which(substring(parnames,1,nchar(name.x))==name.x)
-    ind.beta      <- which(substring(parnames,1,nchar(name.beta))==name.beta)
-    ind.notwarmup <- round(res@sim$warmup/res@sim$thin+1):round(res@sim$iter/res@sim$thin)
-    print("")
-    print(paste("n.latent",n.latent))
-    if ( n.latent == 1 )
-    {
-      n.x    <- length(ind.x)
-      
-      # calculate means of chain 1 at all sites
-      x.mean.1 <- rep(NA,length=n.x)
-      for ( i in 1:n.x ) x.mean.1[i] <- mean(res@sim$samples[[1]][[ind.x[i]]][ind.notwarmup])
-      if ( n.chain > 1 )  # adapt other chains to first:
-      {
-        for ( ch in 2:n.chain )  # match chains to first chain
-        {
-          print(paste("chain",ch))
-          # calculate means of chain ch at all sites
-          x.mean.ch <- rep(NA,length=n.x)
-          for ( i in 1:n.x ) x.mean.ch[i] <- mean(res@sim$samples[[ch]][[ind.x[i]]][ind.notwarmup])
-          dx.min.plus  <- sum(abs(x.mean.1-x.mean.ch))
-          dx.min.minus <- sum(abs(x.mean.1+x.mean.ch))
-          if ( dx.min.minus < dx.min.plus )
-          {
-            # change sign:
-            x.mean.ch <- -x.mean.ch
-            res@sim$samples[[ch]][[ind.x]]    <- -res@sim$samples[[ch]][[ind.x]]
-            res@sim$samples[[ch]][[ind.beta]] <- -res@sim$samples[[ch]][[ind.beta]]
-            print("sign changed")
-          }
-        }
-      }
-    }
-    else  # n.latent > 1
-    {
-      n.x.i    <- round(length(ind.x)/n.latent)
-      ind.x    <- matrix(ind.x,ncol=n.latent,byrow=FALSE)    # reformat ind.x
-      ind.beta <- matrix(ind.beta,ncol=n.latent,byrow=TRUE)  # reformat ind.beta
-      
-      # calculate means of chain 1 at all sites and for all latent variables
-      x.mean.1 <- matrix(NA,nrow=n.x.i,ncol=n.latent)
-      for ( i in 1:n.x.i )
-      {
-        for ( k in 1:n.latent ) x.mean.1[i,k] <- mean(res@sim$samples[[1]][[ind.x[i,k]]][ind.notwarmup])
-      }
-      
-      if ( n.chain > 1 )
-      {
-        for ( ch in 2:n.chain )  # match chains to first chain
-        {
-          print(paste("chain",ch))
-          # calculate means of chain ch at all sites and for all latent variables
-          x.mean.ch <- matrix(NA,nrow=n.x.i,ncol=n.latent)
-          for ( i in 1:n.x.i )
-          {
-            for ( k in 1:n.latent ) x.mean.ch[i,k] <- mean(res@sim$samples[[ch]][[ind.x[i,k]]][ind.notwarmup])
-          }
-          for ( k in 1:n.latent )  # match latent variables and signs
-          {
-            k.min <- k
-            plus.min <- TRUE 
-            dx.min.plus  <- sum(abs(x.mean.1[,k]-x.mean.ch[,k]))
-            dx.min.minus <- sum(abs(x.mean.1[,k]+x.mean.ch[,k]))
-            dx.min <- dx.min.plus
-            if ( dx.min.minus < dx.min.plus ) { plus.min <- FALSE; dx.min <- dx.min.minus }
-            if ( n.latent > k )
-            {
-              for ( kk in (k+1):n.latent )
-              {
-                dx.min.plus  <- sum(abs(x.mean.1[,kk]-x.mean.ch[,kk]))
-                dx.min.minus <- sum(abs(x.mean.1[,kk]+x.mean.ch[,kk]))
-                if ( dx.min.plus  < dx.min ) { dx.min <- dx.min.plus;  plus.min <- TRUE; k.min <- kk }
-                if ( dx.min.minus < dx.min ) { dx.min <- dx.min.minus; plus.min <- FALSE; k.min <- kk }
-              }
-            }
-            print(paste("k",k))
-            print(paste("k.min",k.min))
-            # exchange variables:
-            tmp <- x.mean.ch[,k.min]
-            x.mean.ch[,k.min] <- x.mean.ch[,k]
-            if ( plus.min ) x.mean.ch[,k] <-  tmp
-            else            x.mean.ch[,k] <- -tmp
-            for ( i in 1:nrow(ind.x) )
-            {
-              tmp <- res@sim$samples[[ch]][[ind.x[i,k.min]]]
-              res@sim$samples[[ch]][[ind.x[i,k.min]]] <- res@sim$samples[[ch]][[ind.x[i,k]]]
-              if ( plus.min ) res@sim$samples[[ch]][[ind.x[i,k]]] <-  tmp
-              else            res@sim$samples[[ch]][[ind.x[i,k]]] <- -tmp
-            }
-            print("exchange x completed")
-            for ( j in 1:nrow(ind.beta) )
-            {
-              tmp <- res@sim$samples[[ch]][[ind.beta[j,k.min]]]
-              res@sim$samples[[ch]][[ind.beta[j,k.min]]] <- res@sim$samples[[ch]][[ind.beta[j,k]]]
-              if ( plus.min ) res@sim$samples[[ch]][[ind.beta[j,k]]] <-  tmp
-              else            res@sim$samples[[ch]][[ind.beta[j,k]]] <- -tmp
-            }
-            print("exchange beta completed")
-          }
-        }
-      }
-    }
+  if("res.D1" %in% ls(model.image)){
+    res <- model.image$res.D1
+  } else{
+    res <- model.image$res
   }
-  
-  
-  # Extract the modified stanfit object
-  res.extracted.trace2 <- extract(res,permuted=FALSE,inc_warmup=FALSE)
+
+  # # Extract the modified stanfit object
+  # res.extracted.trace2 <- extract(res,permuted=FALSE,inc_warmup=FALSE)
   res.extracted       <- extract(res,permuted=TRUE,inc_warmup=FALSE)
   # Peter's code END
   
   # Extract objects from workspace image and stanfit object
   sites <- model.image$sites # sites with complete predictors and non-zero taxa included in Stan model
   samples <- model.image$samples
+  names(sites) <- samples
   occur.taxa <- model.image$occur.taxa # non-zero site-species matrix included in Stan model
   env.cond <- model.image$env.cond # complete influence factors included in Stan model
   inf.fact <- model.image$inf.fact # influence factors included in Stan model
@@ -1623,11 +1850,11 @@ extract.jsdm <- function(directory = 'outputs/paper 1 extensions', folder) {
   rownames(beta.taxa.maxpost) <- inf.fact
   
   # Get the occurrence frequency to order labels
-  n <- occur.freq(y)
+  n.present <- occur.freq(y)
   
   # Prepare tidy data from maximum posterior beta_taxa
   beta <- t(beta.taxa.maxpost)
-  beta <- data.table(beta, stringsAsFactors = F)
+  beta <- as.tibble(beta, stringsAsFactors = F)
   beta$Taxon <- colnames(occur.taxa)
   beta <- gather(beta, Variable, Parameter, -Taxon)
   
@@ -1646,7 +1873,7 @@ extract.jsdm <- function(directory = 'outputs/paper 1 extensions', folder) {
     corrfact.comm.maxpost <- corrfact.comm[ind.maxpost, ,]
     
     iter.eff <- round((res@sim$iter-res@sim$warmup)/res@sim$thin)*res@sim$chains
-    n.taxa <- length(n)
+    n.taxa <- length(n.present)
     if ( extensions$n.latent > 0 )
     {
       if ( extensions$n.latent == 1 )
@@ -1706,6 +1933,7 @@ extract.jsdm <- function(directory = 'outputs/paper 1 extensions', folder) {
         colnames(x.lat) <- unique.sites
         
         names(x.lat.maxpost) <- unique.sites
+        
       } else if (extensions$lat.site==0){
         rownames(x.lat) <- 1:nrow(x.lat)
         colnames(x.lat) <- samples
@@ -1834,19 +2062,17 @@ extract.jsdm <- function(directory = 'outputs/paper 1 extensions', folder) {
     sum(!is.na(j))
   })
   
-  deviance <- data.table(Taxon = names(deviance.fit), Model = "jSDM", null.dev = deviance.primitive.taxa, res.dev = deviance.maxpost.taxa, std.res.dev = deviance.maxpost.taxa/n.samples, D2 = deviance.fit, n.samples = n.samples[names(deviance.fit)], n = n[names(deviance.fit)], stringsAsFactors = F)
-  
-  row.names(deviance) <- 1:nrow(deviance)
+  deviance <- tibble(Taxon = names(deviance.fit), Model = "jSDM", null.deviance = deviance.primitive.taxa, residual.deviance = deviance.maxpost.taxa, std.deviance = deviance.maxpost.taxa/n.samples, D2 = deviance.fit, n.samples = n.samples[names(deviance.fit)], n.present = n.present[names(deviance.fit)])
   
   ### Prepare tidy data for output
   # Melt the occurrence data into columns of Taxon and Obs
-  obs <- data.table(occur.taxa)
+  obs <- as.tibble(occur.taxa)
   obs$SiteId <- sites
   obs$SampId <- samples
   obs <- gather(obs, Taxon, Obs, -SiteId, -SampId)
   
   # Melt the probabilities into columns of Taxon and Pred
-  prob <- data.table(p.maxpost)
+  prob <- as.tibble(p.maxpost)
   colnames(prob) <- colnames(occur.taxa)
   prob$SiteId <- sites
   prob$SampId <- samples
@@ -1861,13 +2087,13 @@ extract.jsdm <- function(directory = 'outputs/paper 1 extensions', folder) {
   tjur$Model <- folder
   
   ### Prepare output
-  probability$Model <- "jSDM"
-  deviance$Model <- "jSDM"
-  beta$Model <- "jSDM"
+  probability$Model <- folder
+  deviance$Model <- folder
+  beta$Model <- folder
   
-  probability$Trial <- folder
-  deviance$Trial <- folder
-  beta$Trial <- folder
+  # probability$Trial <- folder
+  # deviance$Trial <- folder
+  # beta$Trial <- folder
   
   cat("Save -> || ")
   # Output results to a list
@@ -1908,6 +2134,7 @@ extract.jsdm <- function(directory = 'outputs/paper 1 extensions', folder) {
   output$occur.taxa <- occur.taxa
   output$inf.fact <- inf.fact
   output$env.cond <- env.cond
+  output$trial <- folder
   
   # Store priors for community parameters
   output$mu.alpha.comm.pripar <- model.image$data$mu_alpha_comm_pripar
@@ -1939,6 +2166,65 @@ extract.jsdm <- function(directory = 'outputs/paper 1 extensions', folder) {
   return(output)
 }
 
+plot.trace <- function(directory = "outputs/paper 1 extensions", folder){
+  full.path   <- paste(directory, folder, sep="/")
+  extensions <- identify.jsdm(full.path)
+  file.name.core <- extensions$workspace
+  
+  traceplot.nrow <- 10
+  traceplot.ncol <-  5
+  
+  if ( !require("corrplot") ) { install.packages("corrplot"); library("corrplot") }
+  if ( !require("ellipse") )  { install.packages("ellipse");  library("ellipse") }
+  if ( !require("psych") )    { install.packages("psych");    library("psych") }
+  if ( !require("coda") )     { install.packages("coda");     library("coda") }
+  if ( !require("rstan") )    { install.packages("rstan");    library("rstan") }
+  rstan_options(auto_write = TRUE)
+  options(mc.cores = parallel::detectCores())
+  
+  if ( !file.exists(paste(directory, folder,file.name.core,sep="/")) ){
+    print(paste("File: ",paste(directory, folder, file.name.core,sep="/"),"not found"))
+  } 
+  load(file=paste(full.path,"/",file.name.core,sep=""))
+  
+  res.orig <- res
+  res.extracted.trace1 <- extract(res,permuted=FALSE,inc_warmup=FALSE)
+  res.extracted.trace2 <- extract(res,permuted=FALSE,inc_warmup=FALSE)
+  res.extracted       <- extract(res,permuted=TRUE,inc_warmup=FALSE)
+  
+  mod.char <- matrix(c("Model",submodel),nrow=1)
+  mod.char <- rbind(mod.char,c("Number of taxa",ncol(occur.taxa)))
+  mod.char <- rbind(mod.char,c("Number of sites",n.sites))
+  mod.char <- rbind(mod.char,c("Number of samples",n.samples))
+  mod.char <- rbind(mod.char,c("Number of ext. influence factors",ncol(data$x)))
+  mod.char <- rbind(mod.char,c("Influence factors",paste(names(data$x),collapse=",")))
+  n.par <- 0
+  pars  <- ""
+  for ( i in 1:(length(res.extracted)-1)){
+    d <- dim(res.extracted[[i]])
+    n <- 1; if ( length(d)>1 ) n <- prod(d[-1]); n.par <- n.par+n
+    if ( nchar(pars)>0 ) pars <- paste(pars,",",sep="")
+    pars <- paste(pars,names(res.extracted)[i],"(",n,")",sep="")
+  }
+  mod.char <- rbind(mod.char,c("Number of parameters",n.par))
+  mod.char <- rbind(mod.char,c("Parameters",pars))
+  
+  dims <- dim(res.extracted.trace1)
+  pdf(paste(full.path,"/",folder,"_traces.pdf",sep=""),width=8,height=12)
+  par(mfrow=c(traceplot.nrow,traceplot.ncol),mar=c(2,2,2,0.5)+0.2) # c(bottom, left, top, right)
+  for ( i in 1:ceiling(length(names(res))/(traceplot.nrow*traceplot.ncol)) ){
+    start <- (i-1)*traceplot.nrow*traceplot.ncol+1
+    end   <- min(start+traceplot.nrow*traceplot.ncol-1,length(names(res)))
+    for ( j in start:end ){
+      plot(numeric(0),numeric(0),type="n",cex.axis=0.8,
+           xlim=c(0,dims[1]),ylim=range(res.extracted.trace1[,,j]),xlab="",ylab="",
+           main=dimnames(res.extracted.trace1)[[3]][j])
+      for ( k in 1:dims[2] ) lines(1:dims[1],res.extracted.trace1[,k,j],col=k)
+    }
+  }
+  dev.off()
+  return(mod.char)
+}
 # Return tidy, complete Variable Selection Results (VSR; no summary statistics are calculated)
 extract.vsr <- function(trial, sample){
   image <- new.env()
@@ -1978,7 +2264,7 @@ extract.vsr <- function(trial, sample){
 
 # Propogate quantiles of a subsample of the posterior through the jSDM
 # to obtain predicted probabilites based on 5th and 95th quantiles (default arguments)
-propogate.jsdm.pred <- function(jsdm, get.quantiles=TRUE, quantiles=c(0.05, 0.95)){
+prop.jsdm.pred <- function(jsdm, get.quantiles=TRUE, quantiles=c(0.05, 0.95)){
   # Extract objects from workspace image to local environment
   sites <- jsdm$sites
   samples <- jsdm$samples
@@ -1987,16 +2273,16 @@ propogate.jsdm.pred <- function(jsdm, get.quantiles=TRUE, quantiles=c(0.05, 0.95
   inf.fact <- jsdm$inf.fact
   
   # Name dimensions of beta^taxa array
-  dimnames(jsdm[["beta_taxa"]])[[1]] <- 1:dim(jsdm[["beta_taxa"]][,,])[1]
-  dimnames(jsdm[["beta_taxa"]])[[2]] <- inf.fact
-  dimnames(jsdm[["beta_taxa"]])[[3]] <- colnames(occur.taxa)
+  dimnames(jsdm$beta.taxa)[[1]] <- 1:dim(jsdm$beta.taxa[,,])[1]
+  dimnames(jsdm$beta.taxa)[[2]] <- inf.fact
+  dimnames(jsdm$beta.taxa)[[3]] <- colnames(occur.taxa)
   
   # Name dimensions of alpha^taxa array
-  dimnames(jsdm[["alpha_taxa"]])[[1]] <- 1:nrow(jsdm[["alpha_taxa"]])
-  dimnames(jsdm[["alpha_taxa"]])[[2]] <- colnames(occur.taxa)
+  dimnames(jsdm$alpha.taxa)[[1]] <- 1:nrow(jsdm$alpha.taxa)
+  dimnames(jsdm$alpha.taxa)[[2]] <- colnames(occur.taxa)
   
-  beta.taxa <- jsdm[["beta_taxa"]]
-  alpha.taxa <- jsdm[["alpha_taxa"]]
+  beta.taxa <- jsdm$beta.taxa
+  alpha.taxa <- jsdm$alpha.taxa
   
   # Propogate a subsample of the full posterior through the model to obtain predicted probabilities,
   # THEN obtain the 5th and 95th quantiles of the predicted probabilities
@@ -2362,9 +2648,9 @@ linear.predictor <- function(jsdm){
         variable <- c(k, "Temp2")
         
         # Subset parameters
-        bjk <- jsdm$parameters[Taxon==j & Variable %in% variable,]
-        bj.temp <- bjk[Variable=="Temp", "Parameter"]$Parameter
-        bj.temp2 <- bjk[Variable=="Temp2", "Parameter"]$Parameter
+        bjk <- filter(jsdm$parameters, Taxon == j & Variable %in% variable)
+        bj.temp <- bjk[bjk$Variable=="Temp", "Parameter"]$Parameter
+        bj.temp2 <- bjk[bjk$Variable=="Temp2", "Parameter"]$Parameter
         
         # Select input data
         x.ik <- x[,c("SiteId", "SampId", "Temp")]
@@ -2374,14 +2660,13 @@ linear.predictor <- function(jsdm){
         z <- bj.temp*(xk-x.mean["Temp"]) + bj.temp2*(xk-x.mean["Temp"])^2
         
         # Bind the data
-        dt <- data.table(SiteId = x.ik[["SiteId"]], SampId = x.ik[["SampId"]], z = z, x = xk, Taxon = j, Variable=variable[1])
-        # slopes <- bind_rows(slopes, dt)
+        dt <- tibble(SiteId = x.ik[["SiteId"]], SampId = x.ik[["SampId"]], z = z, x = xk, Taxon = j, Variable=variable[1])
         return(dt)
       })
     } else{
       J <- lapply(names(n), function(j){
         # Filter data and calculate z-scale
-        bjk <- jsdm$parameters[Taxon==j & Variable==k,]
+        bjk <- filter(jsdm$parameters, Taxon == j & Variable == k)
         bjk <- bjk$Parameter
         
         # Select input data
@@ -2392,8 +2677,7 @@ linear.predictor <- function(jsdm){
         z <- bjk*(xk-x.mean[k])
         
         # Bind the data
-        dt <- data.table(SiteId = x.ik[["SiteId"]], SampId = x.ik[["SampId"]], z = z, x = xk, Taxon = j, Variable = k)
-        # slopes <- bind_rows(slopes, dt)
+        dt <- tibble(SiteId = x.ik[["SiteId"]], SampId = x.ik[["SampId"]], z = z, x = xk, Taxon = j, Variable = k)
         return(dt)
       })
     }
@@ -2405,7 +2689,7 @@ linear.predictor <- function(jsdm){
   if(jsdm$extensions$site.effects==1){
     gamma.maxpost.samples <- jsdm$gamma.samples
     
-    dt <- data.table(SiteId = jsdm$sites, SampId = jsdm$samples, z = gamma.maxpost.samples, x = NA, Taxon = NA, Variable = "Site effect")
+    dt <- tibble(SiteId = jsdm$sites, SampId = jsdm$samples, z = gamma.maxpost.samples, x = NA, Taxon = NA, Variable = "Site effect")
     K[[length(K)+1]] <- dt
   }
   
@@ -2475,13 +2759,7 @@ extract.beta <- function(jsdm){
   # Get beta samples
   beta.samples <- melt(jsdm$beta.taxa) # Transform 3d array into 2d data.table
   
-  # Get trial name
-  ind <- sapply(jsdm, function(i){
-    i$jSDM==TRUE
-  })
-  ind <- unlist(ind)
-  
-  beta.samples$Trial <- names(ind)
+  beta.samples$Trial <- jsdm$trial
   
   # Format the dataset
   colnames(beta.samples) <- c("Sample", "Variable", "Taxon", "Value", "Trial")
@@ -2492,59 +2770,52 @@ extract.beta <- function(jsdm){
 }
 
 extract.tjur <- function(probability){
-  mean.prob <- probability %>%
+  result <- probability %>%
     group_by(Taxon, Obs) %>%
     summarise(MeanPred = mean(Pred, na.rm = TRUE)) %>%
     ungroup() %>%
     mutate(Obs = ifelse(Obs == 1, "Present", "Absent")) %>%
     spread(Obs, MeanPred) %>%
     mutate(D = Present - Absent)
+  return(result)
 }
 
 # Maps ####
 # Plot modelled probabilites across Switzerland given a run.isdm() output object
-map.isdm <- function(results, fileName) {
+map.isdm <- function(isdm, fileName) {
   pdf(paste(fileName, ".pdf", sep=''), paper = 'special', width = 10.5, onefile = TRUE)
-  taxa <- results$taxa
+  taxa <- isdm$taxa
+  
+  dt <- left_join(isdm$probability, inputs$xy, by = "SiteId")
+  dt$Obs <- as.factor(dt$Obs)
+  
   for (j in 1:length(taxa)){
     # For the given taxa and set of models, get the correct model
     taxon <- names(taxa)[j]
     
-    m <- select.isdm(results, taxon)
+    m <- isdm$models[[taxon]]
     dj <- D2(m)
-    dj <- round(d, 2)
-    fv <- m$fitted.values
-    
+    dj <- round(dj, 2)
+
     # Tidy the DF for plotting
-    dt <- results$mdata[, c("SiteId", taxon)]
-    dt <- na.omit(dt)
-    dt <- cbind(dt, fv)
-    colnames(dt) <- c("SiteId", "Obs", "Pred")
-    dt <- left_join(dt, inputs$xy, by = "SiteId")
-    dt$Obs <- as.factor(dt$Obs)
+    plot.data <- filter(dt, Taxon==taxon)
     
     g <- ggplot()
+    # Plot geometry layers
     g <- g + geom_sf(data = inputs$ch, fill=NA, color="black")
-    g <- g + geom_point(data = dt, aes(X, Y, color = Obs, size = Pred), alpha = 0.35)
-    # g <- g + scale_size_continuous(limits = c(0,1), breaks = seq(0, 1, 0.2), range = c(2, 7))
-    g <- g + scale_radius(limits = c(0,1), breaks =seq(0, 1, 0.2), range = c(2, 6))
+    g <- g + geom_point(data = plot.data, aes(X, Y, color = Obs, size = Pred), alpha = 0.35)
+    g <- g + scale_radius(limits = c(0,1), breaks = seq(0, 1, 0.2), range = c(2, 6))
+
+    # Configure theme and labels
     g <- g + labs(title = paste("Probability of occurrence vs observations of",paste(taxon)),
-                  subtitle = paste("iSDM: y ~", paste(results$inf.fact, collapse=" ", sep = " "), "- page", j, "\nD2 = ", dj),
-                  x = "",
-                  y = "",
+                  subtitle = paste("iSDM: y ~", paste(isdm$inf.fact, collapse=" ", sep = " "), "- page", j, "\nD2 = ", dj),
                   size = "Probability of\noccurrence")
-    g <- g + theme_minimal(base_size = 15)
-    g <- g + theme(plot.title = element_text(), 
-                   plot.subtitle = element_text(),
-                   panel.grid.major=element_line(colour="transparent"),
-                   axis.text = element_blank())
-    g <- g + scale_y_continuous(breaks=NULL)
-    g <- g + scale_x_continuous(breaks=NULL)
-    g <- g + guides(color = guide_legend(override.aes = list(size=6)))
-    g <- g + scale_color_manual(name = "Observation", values=c("#FF0000", "#0077FF"), labels=c("Absence", "Presence"))
+    g <- g + theme_void(base_size = 15)
+    g <- g + theme(panel.grid.major = element_line(colour="transparent"))
+    g <- g + guides(colour = guide_legend(override.aes = list(size=6)))
+    g <- g + scale_color_manual(name = "Observation", values=c("0" = "#FF0000", "1" = "#0077FF"), labels=c("Absence", "Presence"))
     cat("Plotting taxon: ", taxon, "\n")
     print(g)
-    rm(d, fv, m)
   }
   dev.off()
 }
@@ -2553,8 +2824,7 @@ map.isdm <- function(results, fileName) {
 map.jsdm <- function(jsdm, fileName){
   # Get probability/observations, deviance, and occurrence frequency for all taxa
   probability <- left_join(jsdm$probability, inputs$xy, by="SiteId")
-  setDT(probability)
-  
+
   deviance <- jsdm$deviance[, c("Taxon", "D2")]
   d <- deviance$D2
   names(d) <- jsdm$Taxon
@@ -2566,28 +2836,23 @@ map.jsdm <- function(jsdm, fileName){
   for (j in 1:length(taxa)){
     # For the given taxa, get the probabilities/observations
     taxon <- names(taxa)[j]
-    dt <- probability[Taxon==taxon, ]
+    dt <- filter(probability, Taxon==taxon)
     dj <- round(d[taxon], 2)
     dt$Obs <- as.factor(dt$Obs)
     
     g <- ggplot()
+    # Plot geometry layers
     g <- g + geom_sf(data = inputs$ch, fill=NA, color="black")
     g <- g + geom_point(data = dt, aes(X, Y, color = Obs, size = Pred), alpha = 0.35)
-    # g <- g + scale_size_continuous(limits = c(0,1), breaks = seq(0, 1, 0.2), range = c(2, 7))
-    g <- g + scale_radius(limits = c(0,1), breaks =seq(0, 1, 0.2), range = c(2, 6))
+    g <- g + scale_radius(limits = c(0,1), breaks = seq(0, 1, 0.2), range = c(2, 6))
+
+    # Configure theme and labels
     g <- g + labs(title = paste("Probability of occurrence vs observations of",paste(taxon)),
                   subtitle = paste("jSDM: y ~", paste(jsdm$inf.fact, collapse=" ", sep = " "), "- page", j, "\nD2 = ", dj),
-                  x = "",
-                  y = "")
-    g <- g + theme_minimal(base_size = 15)
-    g <- g + theme(plot.title = element_text(), 
-                   plot.subtitle = element_text(),
-                   panel.grid.major = element_line(colour="transparent"),
-                   axis.text = element_blank())
-    g <- g + scale_y_continuous(breaks=NULL)
-    g <- g + scale_x_continuous(breaks=NULL)
+                  size = "Probability of\noccurrence")
+    g <- g + theme_void(base_size = 15)
+    g <- g + theme(panel.grid.major = element_line(colour="transparent"))
     g <- g + guides(colour = guide_legend(override.aes = list(size=6)))
-    g <- g + labs(size = "Probability of\noccurrence")
     g <- g + scale_color_manual(name = "Observation", values=c("0" = "#FF0000", "1" = "#0077FF"), labels=c("Absence", "Presence"))
     cat("Plotting taxon: ", taxon, "\n")
     print(g)
@@ -2595,37 +2860,31 @@ map.jsdm <- function(jsdm, fileName){
   dev.off()
 }
 
-map.jsdm.taxon <- function(results, taxon, legend=TRUE){
+map.jsdm.taxon <- function(jsdm, taxon, legend=FALSE){
   # Get probability/observations, deviance, and occurrence frequency for all taxa
   probability <- left_join(jsdm$probability, inputs$xy, by="SiteId")
-  setDT(probability)
 
   # For the given taxa, get the probabilities/observations
-  dt <- probability[Taxon==taxon, ]
-  dt$Obs <- as.factor(dt$Obs)
+  plot.data <- filter(probability, Taxon == taxon)
+  plot.data$Obs <- as.factor(plot.data$Obs)
   
   taxon.label <- sub("_", " ", taxon)
   
   g <- ggplot()
   g <- g + geom_sf(data = inputs$ch, fill=NA, color="black")
-  g <- g + geom_point(data = dt, aes(X, Y, color = Obs, size = Pred), alpha = 0.35)
+  g <- g + geom_point(data = plot.data, aes(X, Y, color = Obs, size = Pred), alpha = 0.35)
   g <- g + scale_radius(limits = c(0,1), breaks =seq(0, 1, 0.2), range = c(2, 6))
   
   # Adjust theme and axes/labels
-  g <- g + scale_y_continuous(breaks = NULL)
-  g <- g + scale_x_continuous(breaks = NULL)
-  g <- g + theme_minimal(base_size = 15)
-  g <- g + theme(plot.title = element_text(hjust = 0.5),
-                 axis.title = element_blank(),
-                 axis.text = element_blank,
-                 panel.grid.major = element_line(colour="transparent"),
-                 plot.margin = unit(c(0.1,0.1,0.1,0.1), "lines"))
-  
-  # Adjust legend and colors
-  g <- g + scale_color_manual(name = "Observation", values=c("0" = "#FF0000", "1" = "#0077FF"), labels = c("Absence", "Presence"))
-  g <- g + guides(colour = guide_legend(override.aes = list(size=6)))
   g <- g + labs(title = taxon.label,
                 size = "Probability of\noccurrence")
+  g <- g + theme_void(base_size = 15)
+  g <- g + theme(plot.title = element_text(hjust = 0.5),
+                 panel.grid.major = element_line(colour="transparent"),
+                 plot.margin = unit(c(0.1,0.1,0.1,0.1), "lines"))
+  g <- g + guides(colour = guide_legend(override.aes = list(size=6)))
+  g <- g + scale_color_manual(name = "Observation", values=c("0" = "#FF0000", "1" = "#0077FF"), labels=c("Absence", "Presence"))
+
   if (!legend){
     g <- g + guides(colour=FALSE, size=FALSE)
   }
@@ -2634,9 +2893,10 @@ map.jsdm.taxon <- function(results, taxon, legend=TRUE){
 
 map.jsdm.pred <- function(jsdm, fileName){
   cat("Propogating posterior quantiles through joint model...\n")
-  dt <- extract.jsdm.pred(jsdm, get.quantiles=TRUE) # Get predicted probabilities with default quantiles c(0.05, 0.95)
+  dt <- prop.jsdm.pred(jsdm, get.quantiles=TRUE) # Get predicted probabilities with default quantiles c(0.05, 0.95)
   dt <- left_join(dt, inputs$xy, by="SiteId")
   setDT(dt)
+  setkey(dt, Taxon)
   
   # Format data for ggplot() aesthetics
   dt <- na.omit(dt)
@@ -2671,7 +2931,8 @@ map.jsdm.pred <- function(jsdm, fileName){
                   size = "Probability of\noccurrence",
                   alpha = "Posterior",
                   color = "Observation")
-    g <- g + theme_minimal(base_size = 15)
+    # g <- g + theme_minimal(base_size = 15)
+    g <- g + theme_void(base_size = 15)
     g <- g + theme(plot.title = element_text(hjust = 0.5), 
                    plot.subtitle = element_text(hjust = 0.5),
                    panel.grid.major = element_line(colour="transparent"))
@@ -2680,8 +2941,8 @@ map.jsdm.pred <- function(jsdm, fileName){
     g <- g + guides(size = guide_legend(override.aes = list(color="black", stroke=0), order=1),
                     alpha = guide_legend(override.aes = list(size=6, shape=c(19,21), stroke=c(0,0.75), color="black"), order=2),
                     color = guide_legend(override.aes = list(size=6, stroke=0), order=3))
-    g <- g + scale_y_continuous(breaks=NULL)
-    g <- g + scale_x_continuous(breaks=NULL)
+    # g <- g + scale_y_continuous(breaks=NULL)
+    # g <- g + scale_x_continuous(breaks=NULL)
     g <- g + scale_radius(limits = c(0,1), breaks = seq(0, 1, 0.2), range = c(2, 6))
     g <- g + scale_color_manual(values=c("0" = "#FF0000", "1" = "#0077FF"), labels=c("Absence", "Presence"))
     g <- g + scale_alpha_manual(values=c("0.65"="0.65", "0.35"="0.35"), labels=c("5th quantile", "95th quantile"))
@@ -2692,823 +2953,12 @@ map.jsdm.pred <- function(jsdm, fileName){
   }
   dev.off()
 }
-# # Beginning with a full model, drop one variable at a time (OVAT) and measure
-# # the change in D-squared
-# VarImp <- function(cm, predictors){
-#   # Calculate % increase in residual deviance vs. full model
-#   # Calculate % decrease in D2 when variable is dropped
-#   variables <- colnames(select(predictors, -SiteId, -SampId))
-#   
-#   # Obtain deviance statistics for full model
-#   fm <- RunModel(cm, predictors, 100, trace=F)
-#   full.deviance <- fm$deviance; rm(fm)
-#   # Fill/calculate columns: Removed, D2.change, res.dev.change
-#   full.deviance$Removed <- "None"
-#   full.deviance$D2.change <- 0
-#   full.deviance$res.dev.change <- 0
-#   if (class(predictors)[1]=="data.frame"){ setDT(predictors)}
-#   for (k in 1:length(variables)){
-#     v <- variables[k]
-#     cat("Drop variable:", v,"\n")
-#     # Select data
-#     vss <- variables[-k]
-#     x <- predictors[, c("SiteId", "SampId", vss), with=F]
-#     # Run subset
-#     fm <- RunModel(cm, x, 100, trace=F)
-# 
-#     # Extract deviance
-#     dev.drop <- fm$deviance; rm(fm)
-#     # Fill/calculate columns: Removed, D2.change, res.dev.change
-#     dev.drop$Removed <- v
-#     dev.drop$D2.change <- (full.deviance[Taxon==dev.drop$Taxon & Removed=="None", "D2"]-dev.drop$D2)/full.deviance[Taxon==dev.drop$Taxon & Removed=="None", "D2"]
-#     dev.drop$res.dev.change <- (full.deviance[Taxon==dev.drop$Taxon & Removed=="None", "res.dev"]-dev.drop$res.dev)/full.deviance[Taxon==dev.drop$Taxon & Removed=="None", "res.dev"]
-#     # Rbindlist() to full model result
-#     full.deviance <- bind_rows(full.deviance, dev.drop)
-#   }
-#   return(full.deviance)
-# }
 
-# plotSDM + elevation map ###
-# library(rasterVis)
-# library(ggplot2)
-
-# dem <- raster("inputs/dem/dem500m.tif")
-
-# geoSDM <- function(results, fileName) {
-#   # Get the coordinates for all distinct sites
-#   xy <- select(inv, SiteId, X, Y)
-#   xy <- distinct(xy, SiteId, X, Y)
-#   
-#   taxa <- results$taxa
-#   d <- sapply(results$models, function(m){
-#     (m$null.deviance-m$deviance)/m$null.deviance
-#   })
-#   
-#   page <- 1
-#   
-#   pdf(paste('outputs/', fileName, ".pdf", sep=''), paper = 'special', width = 11, onefile = TRUE)
-#   
-#   for (t in 1:length(taxa)){
-#     # For the given taxa and set of models, get the correct model
-#     taxon <- names(taxa)[t]
-#     index <- match(taxon, names(taxa))
-#     m <- results$models[[index]]
-#     d.squared <- round(d[t], 2)
-#     fv <- m$fitted.values
-#     
-#     # Tidy the DF for plotting
-#     dt <- results$mdata[, c("SiteId", taxon)]
-#     dt <- na.omit(dt)
-#     dt <- cbind(dt, fv)
-#     colnames(dt) <- c("SiteId", "Observed", "Fitted")
-#     dt <- left_join(dt, xy, by = "SiteId")
-#     dt$PA <- ifelse(dt$Observed == 1, "blue", "red")
-#     
-#     # dt$Fitted <- dt$Predicted^3
-#     # dt$Size <- rescale(dt$Size, to = c(0,1))
-#     dt$Observed <- as.factor(dt$Observed)
-#     dt$PA <- as.factor(dt$PA)
-#     
-#     g <- gplot(dem, maxpixels = 5e5)
-#     g <- g + geom_tile(aes(fill = value))
-#     g <- g + scale_fill_gradient(low = 'white', high = 'black', na.value = "transparent")
-#     g <- g + coord_equal()
-#     
-#     
-#     # g <- g + geom_point(data = inputs$ch, aes(POINT_X, POINT_Y))
-#     # g <- g + geom_path(lineend = "round")
-#     
-#     g <- g + geom_point(data = dt, aes(X, Y, color = Observed, size = Fitted), alpha = 0.50)
-#     g <- g + scale_size_continuous(limits = c(0,1), breaks = seq(0, 1, 0.2), range = c(2, 7))
-#     g <- g + labs(x = "",
-#                   y = "")
-#     g <- g + scale_colour_brewer(palette = "Set1")
-#     g <- g + theme(plot.title = element_text(hjust = 0.5), plot.subtitle = element_text(hjust = 0.5))
-#     g <- g + scale_y_continuous(breaks=NULL)
-#     g <- g + scale_x_continuous(breaks=NULL)
-#     g <- g + guides(colour = guide_legend(override.aes = list(size=6)))
-#     g <- g + labs(color = "Observation", size = "Predicted probability", fill = "Elevation (m)")
-#     g <- g + theme_minimal(base_size = 15)
-#     print(g)
-#     cat("Plotting taxa: ", taxon, "\n")
-#     page <- page + 1
-#     print(g)
-#   }
-#   dev.off()
-# }
-
-# # Extract GLM statistics: significant parameters, deviance, and AIC
-# ExtractGLM <- function(results, taxa){
-#   # Extract deviance and AIC statistics from all models
-#   d <- sapply(results$models, function(x){
-#     c(x$deviance, x$null.deviance, x$aic)
-#   })
-#   d <- t(d)
-#   colnames(d) <- c("res.dev", "null.dev", "aic")
-#   
-#   # Create tidy DF with taxa names
-#   d <- as.data.frame(d, stringsAsFactors = FALSE)
-#   d$Taxa <- names(results$taxa)
-#   
-#   
-#   d$D2 <- ((d$null.dev - d$res.dev) / d$null.dev)
-#   
-#   # Select significant model statistics in (d) based on d$taxa in (n)
-#   n <- results$parameters$Taxa
-#   
-#   d <- d[d[, "Taxa"] %in% n,]
-#   
-#   # Combine model fit statistics with parameters
-#   modsum <- left_join(d, results$parameters, by = "Taxa")
-#   colnames(modsum)[which(colnames(modsum)=="Taxa")] <- taxa
-#   
-#   # Add frequency of occurrence for taxa
-#   modsum$n <- results$taxa[modsum[, taxa]]
-#   return(modsum)
-# }
-# 
-# # For each taxa, for each influence factor, fit taxa ~ inf.fact and extract D2
-# varFit <- function(comm, pr){
-#   # Only keep community sites that have complete predictors
-#   pr <- na.omit(pr)
-#   input_cm <- comm[comm$SiteId %in% pr$SiteId, ]
-#   
-#   # Convert to data table if necessary
-#   if (class(input_cm)[1] == "data.frame"){ input_cm <- as.data.table(input_cm)}
-#   if (class(pr)[1] == "data.frame"){ pr <- as.data.table(pr)}
-#   
-#   # Get taxa with sufficient frequency of occurrence
-#   nsites <- uniqueN(input_cm$SiteId)
-#   cutoff <- nsites*n
-#   ntaxa <- ProjectStats(comm)
-#   ntaxa <- filter(ntaxa, n_occurrence > cutoff)
-#   taxa <- ntaxa$Taxa
-#   
-#   # Prepare data for model input
-#   sites <- select(input_cm, SiteId)
-#   input_cm <- lapply(input_cm[,-1,with=FALSE], function(x){as.factor(x)})
-#   input_cm <- bind_cols(sites, input_cm)
-#   mdata = left_join(input_cm, pr, by = "SiteId")
-#   tc <- trainControl(method = "none")
-# 
-#   # Prepare output data structures
-#   iff <- colnames(pr[, -1])
-#   mdb <- matrix(data = NA, nrow = length(taxa), ncol = length(iff))
-#   
-#   for (k in 1:length(iff)){
-#     for (t in 1:length(taxa)){
-#       pform <- paste(taxa[t], "~", iff[k])
-#       iform <- as.formula(pform)
-# 
-#       cat("Fitting:", pform, "\n")
-#       m <- train(iform, family = binomial(link = "logit"), data = mdata, method = "glm", trControl = tc, maxit = 100, na.action = na.omit)
-#       D2 <- (m$null.deviance - m$deviance) / m$null.deviance
-#       # }
-#       mdb[t, k] <- D2
-#     }
-#   }
-#   
-#   colnames(mdb) <- iff
-#   rownames(mdb) <- taxa
-#   mdb <- melt(mdb)
-#   colnames(mdb) <- c("Taxa", "Variable", "D2")
-#   return(mdb)
-# }
-# 
-# # For each taxa, run full model and then minus each influence factor from the model
-# varStep <- function(cm, predictors){
-#   # duplicate environmental conditions
-#   rownames(predictors) <- predictors[,"SiteId"]
-#   predictors <- predictors[cm$SiteId,]
-#   row.names(predictors) <- 1:nrow(predictors) # reset the row names
-#   
-#   inf.fact <- colnames(predictors[,-1])
-#   
-#   # exclude SITES that do not have full sets of influence factors:
-#   ind <- !apply(is.na(predictors[,inf.fact]),1,FUN=any)
-#   ind <- ifelse(is.na(ind),FALSE,ind)
-#   
-#   input_cm <- cm[ind, ]
-#   predictors   <- predictors[ind, ]
-#   
-#   # Count and filter taxa by cutoff
-#   ntaxa <- apply(input_cm[,-1], 2, sum, na.rm = TRUE)
-#   ntaxa <- sort(ntaxa, decreasing = TRUE)
-#   ntaxa <- ntaxa[ntaxa > 0]
-#   taxa <- names(ntaxa)
-#   
-#   # Get the influence factors and prepare the output matrix
-#   pr <- predictors[, -1]
-#   iff <- colnames(pr)
-#   col <- length(iff)+1
-#   # Prepare input data
-#   mdata <- cbind(input_cm, pr)
-#   # Prepare output data matrix
-#   mdb <- matrix(data = NA, nrow = length(taxa), ncol = col)
-#   
-#   for (t in 1:length(taxa)){
-#     # Run the complete model
-#     pform <- paste(taxa[t], "~", paste(iff, collapse = "+"))
-#     iform <- as.formula(pform)
-#     m <- glm(iform, family = binomial(link = "logit"), data = mdata, maxit = 100, na.action = na.omit)
-#     m$data <- NULL
-#     D2 <- (m$null.deviance - m$deviance) / m$null.deviance
-#     mdb[t, col] <- D2
-#     
-#     # Drop each influence factor and re-run the model
-#     for (k in 1:length(iff)){
-#       pform <- paste(taxa[t], "~", paste(iff[-k], collapse = "+"))
-#       iform <- as.formula(pform)
-#       m <- glm(iform, family = binomial(link = "logit"), data = mdata, maxit = 100, na.action = na.omit)
-#       m$data <- NULL
-#       D2 <- (m$null.deviance - m$deviance) / m$null.deviance
-#       mdb[t, k] <- D2 
-#     }
-#   }
-#   
-#   mdb <- data.frame(mdb, stringsAsFactors = F)
-#   colnames(mdb) <- c(iff, "Full Model")
-#   mdb$Taxa <- taxa
-#   mdb <- gather(mdb, "Variable", "D2", -Taxa)
-#   return(mdb)
-# }
-# 
-# # For every taxa, do a stepwise logistic regression
-# RunStepwise <- function(cm, predictors) {
-#   # Only keep community sites that have complete predictors
-#   input_cm <- cm[cm$SiteId %in% predictors$SiteId, ]
-#   
-#   # Convert the community/predictor data to data table if needed
-#   if (class(input_cm)[1] == "data.frame"){ input_cm <- as.data.table(input_cm)}
-#   if (class(predictors)[1] == "data.frame"){ predictors <- as.data.table(predictors)}
-#   
-#   # Filter taxa by cutoff
-#   nsites <- length(unique(input_cm$SiteId))
-#   cutoff <- nsites*0.05
-#   ntaxa <- ProjectStats(cm)
-#   ntaxa <- filter(ntaxa, n_occurrence > cutoff)
-#   taxa <- ntaxa$Taxa
-#   
-#   # Prepare data for model input
-#   sites <- select(input_cm, SiteId)
-#   input_cm <- lapply(input_cm[,-1,with=FALSE], function(x){as.factor(x)})
-#   cat("Model inputs:", nrow(input_cm), "sites with", ncol(input_cm), "taxa \n")
-#   input_cm <- bind_cols(sites, input_cm)
-#   mdata = left_join(input_cm, predictors, by = "SiteId")
-#   
-#   # Prepare the influence factors for the formulas
-#   inf.factors <- paste(colnames(predictors[, -1, with=FALSE]), collapse = "+")
-#   
-#   # Pre-allocate matrix X with j rows and k columns
-#   x <- matrix(data = 0, nrow = length(taxa), ncol = ncol(predictors[, -1, with = FALSE]))
-#   colnames(x) <- colnames(predictors[, -1, with = FALSE])
-#   rownames(x) <- taxa
-#   
-#   for (y in 1:length(taxa)){
-#     printFormula <- paste(taxa[y], "~", inf.factors)
-#     inputFormula <- as.formula(printFormula)
-#     
-#     cat("Fitting:", printFormula, "\n")
-#     
-#     # Fit the initial model and do backwards selection
-#     m <- glm(inputFormula, family = binomial(link = "logit"), data = mdata, maxit = 100, na.action = na.pass)
-#     mstep <- step(m, scale = 0, trace = FALSE, direction = "backward")
-#     
-#     # Insert the beta parameters into output matrix X
-#     beta <- coefficients(mstep)
-#     beta <- beta[names(beta) != "(Intercept)"] # Drop the intercept
-#     x[taxa[y], names(beta)] <- unname(beta) # Insert k parameters for taxa j into matrix X
-#   }
-#   return(x)
-# }
-# 
-# # Extract GAM statistics: significant splines, deviance, and AIC
-# ExtractGAM <- function(results, taxa){
-#   # Extract deviance and AIC statistics from all models
-#   d <- lapply(results$models, function(x){
-#     var <- c(x$deviance, x$null.deviance, x$aic)
-#   })
-#   
-#   # Create tidy DF with taxa names
-#   d <- do.call(rbind, d)
-#   d <- cbind(d, results$taxa$Taxa)
-#   d <- as.data.frame(d, stringsAsFactors = FALSE)
-#   colnames(d) <- c("gam.res.dev", "gam.null.dev", "gam.aic", taxa)
-#   d[, 1] <- as.numeric(d[, 1])
-#   d[, 2] <- as.numeric(d[, 2])
-#   d[, 3] <- as.numeric(d[, 3])
-#   
-#   d$gam.pdev <- ((d[,2]-d[,1])/d[,2])*100
-#   
-#   return(d)
-#   # # Select significant model statistics in (d) based on d$taxa in (n)
-#   # n <- row.names(results$effects)
-#   # 
-#   # d <- d[d[, taxa] %in% n,]
-#   # 
-#   # # Combine model statistics with significant effects
-#   # e <- as.data.frame(results$effects)
-#   # e <- add_rownames(e, var = taxa)
-#   # modsum <- left_join(d, e, by = taxa)
-#   # 
-#   # # Add frequency of occurrence for taxa
-#   # z <- as.data.frame(results$taxa)
-#   # colnames(z) <- c(taxa, "n")
-#   # z <- z[z[, taxa] %in% n,]
-#   # modsum <- left_join(modsum, z, by = taxa)
-# }
-# 
-# # Adds higher taxonomic levels to model summaries
-# # AddTaxa(proj, proj.glm, "Family")
-# AddTaxa <- function(ProjectData, ModelObject, taxa) {
-#   if (taxa == "Family"){
-#     dt <- select(ProjectData, Phylum, Class, Order, Family)
-#     dt <- distinct(dt)
-#   }
-#   
-#   if (taxa == "Genus") {
-#     dt <- select(ProjectData, Phylum, Class, Order, Family, Genus)
-#     dt <- distinct(dt)
-#   }
-#   
-#   if (taxa == "Species") {
-#     dt <- select(ProjectData, Phylum, Class, Order, Family, Genus, Species)
-#     dt <- distinct(dt)
-#   }
-#   
-#   #  dt <- dt[!duplicated(dt[, "Family"]),]
-#   ModelObject$summary <- left_join(ModelObject$summary, dt, by = taxa)
-# }
-# 
-# # Moves columns within results$summary table; function is called in Workflow()
-# SortCol <- function(results){
-#   # Desired order of all possible taxonomic levels, model statistics, and predictors
-#   apc <- c("Phylum", "Class","Order", "Family", "Genus", "Species", "n", "res.dev", "null.dev", "aic", "pdev", "D2", 
-#            "Urban", "Traffic", "HM", "LUI", "LUIw", "IAR","TU.Dm", "TU.Cr", "PPP", "PPP2","AgIDW", "p_farmland", "A10m", "A20m", "A50m", "Ag100m", "A100m", "A500m", "A1km", "F10m", "F20m", "F50m", "F100m", "F500m", "F1km", "G10m", "G20m", "G50m", "G100m", "G500m", "G1km", "P", "WW", "LU", "FRI", "ED", "WV", "BM", "RW", "WiVar", "BedMod", "EcoMorph", "Flow", "FV", "Velocity", "Temp", "Tempsq", "Temp2", "Shading", "Morph", "FF.int", "gam.res.dev", "gam.null.dev", "gam.pdev")
-#   y <- colnames(results$summary)
-#   z <- intersect(apc, y)
-#   results$summary <- results$summary[z]
-#   return(results)
-# }
-# 
-# # Calls previously defined functions to output complete model summaries
-# Workflow <- function(Project, Taxa, Model) {
-#   # # Create community matrix for all taxa, all programs
-#   # # for colonization potential index (CPI) influence factor
-#   # p <- unique(inv$MonitoringProgram)
-#   # p <- p[!p %in% "VD_old"]
-#   # data <- filter(inv, MonitoringProgram %in% p & !is.na(inv[, get(Taxa)]))
-#   # cc <- complete.cases(data[, Taxa, with = FALSE])
-#   # wcm <- data[cc, ]
-#   # wcm <- CC(wcm, Taxa, "PA")
-#   # wcm <- as.data.frame(wcm)
-#   # rm(p, data, cc)
-#   
-#   # Workflow: SelectData, CC, RunModel, ExtractGLM, AddTaxa, SortCol
-#   dt <- SelectData(Project, Taxa)
-#   comm <- CC(dt, Taxa, "PA")
-#   if (Model == "GLM") {
-#     m <- RunModel(comm, predictors, 0.05, "GLM")
-#     m$summary <- ExtractGLM(m, Taxa)
-#     m$summary <- AddTaxa(dt, m, Taxa)
-#     m <- SortCol(m)
-#   }
-#   if (Model == "GAM") {
-#     m <- RunModel(comm, predictors, 0.05, "GAM")
-#     m$summary <- ExtractGAM(m, Taxa)
-#   }
-#   return(m)
-# }
-
-
-### Model development ###
-# Selects invertebrate observations by programs and taxonomic resolution
-# Select invertebrates by Project ("BDM"), Taxa ("Species")
-# SelectData <- function(Project, Taxa) {
-#   if (length(Project) > 1){
-#     data <- filter(inv, MonitoringProgram %in% Project & !is.na(inv[, get(Taxa)]))
-#     if (class(data)[1] == 'data.frame') {data <- as.data.table(data)}
-#   }
-#   else {
-#     data <- filter(inv, MonitoringProgram == Project & !is.na(inv[, get(Taxa)]))
-#     if (class(data)[1] == 'data.frame') {data <- as.data.table(data)}
-#   }
-#   return(data)
-# }
-# 
-# # Create site-species matrix (only presence-absence works presently)
-# CC <- function(Dataset, Taxa, Method) {
-#   if (nrow(Dataset) > 0) {
-#     data <- select(Dataset, SiteId, get(Taxa), get(Method))
-#     # Sum PA of taxa by site
-#     ct <- dcast(data, SiteId ~ get(Taxa), value.var = "PA", fun.aggregate = sum)
-#     # Convert positive values to 1, else set values to 0
-#     if (class(ct)[1] == 'data.frame') {ct <- as.data.table(ct)}
-#     pa <- apply(ct[,-1, with = FALSE], c(1,2), function(x){if (x > 0) {x = 1} else x = 0})
-#     pam <- cbind(ct[, 1, with = FALSE], pa)
-#     names(pam)[1] <- "SiteId"
-#     pam$SiteId <- as.character(pam$SiteId)
-#     # pam[,-1, with=FALSE] <- apply(pam[,-1, with=FALSE], 2, function(x){as.numeric(x)})
-#     return(pam)
-#   }
-# }
-
-# Calculate: number of occurrences / probability of occurrence by site/ proportion of occurrences
-# Depreciated function: replaced with apply() on post-processed community data
-# ProjectStats <- function(cm) {
-#   if (class(cm)[1] == "data.frame"){ cm <- as.data.table(cm)}
-#   ntaxa <- apply(cm[,-1, with = FALSE], 2, sum, na.rm = TRUE)
-#   ntaxa <- sort(ntaxa, decreasing = TRUE)
-#   ntaxa <- as.data.frame(ntaxa)
-#   ntaxa <-  rownames_to_column(ntaxa, "Taxon")
-#   colnames(ntaxa) <- c("Taxa", "n_occurrence")
-#   return(ntaxa)
-# }
-
-
-# # Extract GLM statistics: significant parameters, deviance, and AIC
-# ExtractGLM <- function(results, taxa){
-#   # Extract deviance and AIC statistics from all models
-#   d <- sapply(results$models, function(x){
-#     c(x$deviance, x$null.deviance, x$aic)
-#   })
-#   d <- t(d)
-#   colnames(d) <- c("res.dev", "null.dev", "aic")
-#   
-#   # Create tidy DF with taxa names
-#   d <- as.data.frame(d, stringsAsFactors = FALSE)
-#   d$Taxa <- names(results$taxa)
-#   
-#   
-#   d$D2 <- ((d$null.dev - d$res.dev) / d$null.dev)
-#   
-#   # Select significant model statistics in (d) based on d$taxa in (n)
-#   n <- results$parameters$Taxa
-#   
-#   d <- d[d[, "Taxa"] %in% n,]
-#   
-#   # Combine model fit statistics with parameters
-#   modsum <- left_join(d, results$parameters, by = "Taxa")
-#   colnames(modsum)[which(colnames(modsum)=="Taxa")] <- taxa
-#   
-#   # Add frequency of occurrence for taxa
-#   modsum$n <- results$taxa[modsum[, taxa]]
-#   return(modsum)
-# }
-
-
-# # For each taxa, for each influence factor, fit taxa ~ inf.fact and extract D2
-# varFit <- function(comm, pr){
-#   # Only keep community sites that have complete predictors
-#   pr <- na.omit(pr)
-#   input_cm <- comm[comm$SiteId %in% pr$SiteId, ]
-#   
-#   # Convert to data table if necessary
-#   if (class(input_cm)[1] == "data.frame"){ input_cm <- as.data.table(input_cm)}
-#   if (class(pr)[1] == "data.frame"){ pr <- as.data.table(pr)}
-#   
-#   # Get taxa with sufficient frequency of occurrence
-#   nsites <- uniqueN(input_cm$SiteId)
-#   cutoff <- nsites*n
-#   ntaxa <- ProjectStats(comm)
-#   ntaxa <- filter(ntaxa, n_occurrence > cutoff)
-#   taxa <- ntaxa$Taxa
-#   
-#   # Prepare data for model input
-#   sites <- select(input_cm, SiteId)
-#   input_cm <- lapply(input_cm[,-1,with=FALSE], function(x){as.factor(x)})
-#   input_cm <- bind_cols(sites, input_cm)
-#   mdata = left_join(input_cm, pr, by = "SiteId")
-#   tc <- trainControl(method = "none")
-# 
-#   # Prepare output data structures
-#   iff <- colnames(pr[, -1])
-#   mdb <- matrix(data = NA, nrow = length(taxa), ncol = length(iff))
-#   
-#   for (k in 1:length(iff)){
-#     for (t in 1:length(taxa)){
-#       pform <- paste(taxa[t], "~", iff[k])
-#       iform <- as.formula(pform)
-# 
-#       cat("Fitting:", pform, "\n")
-#       m <- train(iform, family = binomial(link = "logit"), data = mdata, method = "glm", trControl = tc, maxit = 100, na.action = na.omit)
-#       D2 <- (m$null.deviance - m$deviance) / m$null.deviance
-#       # }
-#       mdb[t, k] <- D2
-#     }
-#   }
-#   
-#   colnames(mdb) <- iff
-#   rownames(mdb) <- taxa
-#   mdb <- melt(mdb)
-#   colnames(mdb) <- c("Taxa", "Variable", "D2")
-#   return(mdb)
-# }
-# 
-# # For each taxa, run full model and then minus each influence factor from the model
-# varStep <- function(cm, predictors){
-#   # duplicate environmental conditions
-#   rownames(predictors) <- predictors[,"SiteId"]
-#   predictors <- predictors[cm$SiteId,]
-#   row.names(predictors) <- 1:nrow(predictors) # reset the row names
-#   
-#   inf.fact <- colnames(predictors[,-1])
-#   
-#   # exclude SITES that do not have full sets of influence factors:
-#   ind <- !apply(is.na(predictors[,inf.fact]),1,FUN=any)
-#   ind <- ifelse(is.na(ind),FALSE,ind)
-#   
-#   input_cm <- cm[ind, ]
-#   predictors   <- predictors[ind, ]
-#   
-#   # Count and filter taxa by cutoff
-#   ntaxa <- apply(input_cm[,-1], 2, sum, na.rm = TRUE)
-#   ntaxa <- sort(ntaxa, decreasing = TRUE)
-#   ntaxa <- ntaxa[ntaxa > 0]
-#   taxa <- names(ntaxa)
-#   
-#   # Get the influence factors and prepare the output matrix
-#   pr <- predictors[, -1]
-#   iff <- colnames(pr)
-#   col <- length(iff)+1
-#   # Prepare input data
-#   mdata <- cbind(input_cm, pr)
-#   # Prepare output data matrix
-#   mdb <- matrix(data = NA, nrow = length(taxa), ncol = col)
-#   
-#   for (t in 1:length(taxa)){
-#     # Run the complete model
-#     pform <- paste(taxa[t], "~", paste(iff, collapse = "+"))
-#     iform <- as.formula(pform)
-#     m <- glm(iform, family = binomial(link = "logit"), data = mdata, maxit = 100, na.action = na.omit)
-#     m$data <- NULL
-#     D2 <- (m$null.deviance - m$deviance) / m$null.deviance
-#     mdb[t, col] <- D2
-#     
-#     # Drop each influence factor and re-run the model
-#     for (k in 1:length(iff)){
-#       pform <- paste(taxa[t], "~", paste(iff[-k], collapse = "+"))
-#       iform <- as.formula(pform)
-#       m <- glm(iform, family = binomial(link = "logit"), data = mdata, maxit = 100, na.action = na.omit)
-#       m$data <- NULL
-#       D2 <- (m$null.deviance - m$deviance) / m$null.deviance
-#       mdb[t, k] <- D2 
-#     }
-#   }
-#   
-#   mdb <- data.frame(mdb, stringsAsFactors = F)
-#   colnames(mdb) <- c(iff, "Full Model")
-#   mdb$Taxa <- taxa
-#   mdb <- gather(mdb, "Variable", "D2", -Taxa)
-#   return(mdb)
-# }
-# 
-# # For every taxa, do a stepwise logistic regression
-# RunStepwise <- function(cm, predictors) {
-#   # Only keep community sites that have complete predictors
-#   input_cm <- cm[cm$SiteId %in% predictors$SiteId, ]
-#   
-#   # Convert the community/predictor data to data table if needed
-#   if (class(input_cm)[1] == "data.frame"){ input_cm <- as.data.table(input_cm)}
-#   if (class(predictors)[1] == "data.frame"){ predictors <- as.data.table(predictors)}
-#   
-#   # Filter taxa by cutoff
-#   nsites <- length(unique(input_cm$SiteId))
-#   cutoff <- nsites*0.05
-#   ntaxa <- ProjectStats(cm)
-#   ntaxa <- filter(ntaxa, n_occurrence > cutoff)
-#   taxa <- ntaxa$Taxa
-#   
-#   # Prepare data for model input
-#   sites <- select(input_cm, SiteId)
-#   input_cm <- lapply(input_cm[,-1,with=FALSE], function(x){as.factor(x)})
-#   cat("Model inputs:", nrow(input_cm), "sites with", ncol(input_cm), "taxa \n")
-#   input_cm <- bind_cols(sites, input_cm)
-#   mdata = left_join(input_cm, predictors, by = "SiteId")
-#   
-#   # Prepare the influence factors for the formulas
-#   inf.factors <- paste(colnames(predictors[, -1, with=FALSE]), collapse = "+")
-#   
-#   # Pre-allocate matrix X with j rows and k columns
-#   x <- matrix(data = 0, nrow = length(taxa), ncol = ncol(predictors[, -1, with = FALSE]))
-#   colnames(x) <- colnames(predictors[, -1, with = FALSE])
-#   rownames(x) <- taxa
-#   
-#   for (y in 1:length(taxa)){
-#     printFormula <- paste(taxa[y], "~", inf.factors)
-#     inputFormula <- as.formula(printFormula)
-#     
-#     cat("Fitting:", printFormula, "\n")
-#     
-#     # Fit the initial model and do backwards selection
-#     m <- glm(inputFormula, family = binomial(link = "logit"), data = mdata, maxit = 100, na.action = na.pass)
-#     mstep <- step(m, scale = 0, trace = FALSE, direction = "backward")
-#     
-#     # Insert the beta parameters into output matrix X
-#     beta <- coefficients(mstep)
-#     beta <- beta[names(beta) != "(Intercept)"] # Drop the intercept
-#     x[taxa[y], names(beta)] <- unname(beta) # Insert k parameters for taxa j into matrix X
-#   }
-#   return(x)
-# }
-# 
-# # Extract GAM statistics: significant splines, deviance, and AIC
-# ExtractGAM <- function(results, taxa){
-#   # Extract deviance and AIC statistics from all models
-#   d <- lapply(results$models, function(x){
-#     var <- c(x$deviance, x$null.deviance, x$aic)
-#   })
-#   
-#   # Create tidy DF with taxa names
-#   d <- do.call(rbind, d)
-#   d <- cbind(d, results$taxa$Taxa)
-#   d <- as.data.frame(d, stringsAsFactors = FALSE)
-#   colnames(d) <- c("gam.res.dev", "gam.null.dev", "gam.aic", taxa)
-#   d[, 1] <- as.numeric(d[, 1])
-#   d[, 2] <- as.numeric(d[, 2])
-#   d[, 3] <- as.numeric(d[, 3])
-#   
-#   d$gam.pdev <- ((d[,2]-d[,1])/d[,2])*100
-#   
-#   return(d)
-#   # # Select significant model statistics in (d) based on d$taxa in (n)
-#   # n <- row.names(results$effects)
-#   # 
-#   # d <- d[d[, taxa] %in% n,]
-#   # 
-#   # # Combine model statistics with significant effects
-#   # e <- as.data.frame(results$effects)
-#   # e <- add_rownames(e, var = taxa)
-#   # modsum <- left_join(d, e, by = taxa)
-#   # 
-#   # # Add frequency of occurrence for taxa
-#   # z <- as.data.frame(results$taxa)
-#   # colnames(z) <- c(taxa, "n")
-#   # z <- z[z[, taxa] %in% n,]
-#   # modsum <- left_join(modsum, z, by = taxa)
-# }
-
-# Adds higher taxonomic levels to model summaries
-# AddTaxa(proj, proj.glm, "Family")
-# AddTaxa <- function(ProjectData, ModelObject, taxa) {
-#   if (taxa == "Family"){
-#     dt <- select(ProjectData, Phylum, Class, Order, Family)
-#     dt <- distinct(dt)
-#   }
-#   
-#   if (taxa == "Genus") {
-#     dt <- select(ProjectData, Phylum, Class, Order, Family, Genus)
-#     dt <- distinct(dt)
-#   }
-#   
-#   if (taxa == "Species") {
-#     dt <- select(ProjectData, Phylum, Class, Order, Family, Genus, Species)
-#     dt <- distinct(dt)
-#   }
-#   
-#   #  dt <- dt[!duplicated(dt[, "Family"]),]
-#   ModelObject$summary <- left_join(ModelObject$summary, dt, by = taxa)
-# }
-
-# # Moves columns within results$summary table; function is called in Workflow()
-# SortCol <- function(results){
-#   # Desired order of all possible taxonomic levels, model statistics, and predictors
-#   apc <- c("Phylum", "Class","Order", "Family", "Genus", "Species", "n", "res.dev", "null.dev", "aic", "pdev", "D2", 
-#            "Urban", "Traffic", "HM", "LUI", "LUIw", "IAR","TU.Dm", "TU.Cr", "PPP", "PPP2","AgIDW", "p_farmland", "A10m", "A20m", "A50m", "Ag100m", "A100m", "A500m", "A1km", "F10m", "F20m", "F50m", "F100m", "F500m", "F1km", "G10m", "G20m", "G50m", "G100m", "G500m", "G1km", "P", "WW", "LU", "FRI", "ED", "WV", "BM", "RW", "WiVar", "BedMod", "EcoMorph", "Flow", "FV", "Velocity", "Temp", "Tempsq", "Temp2", "Shading", "Morph", "FF.int", "gam.res.dev", "gam.null.dev", "gam.pdev")
-#   y <- colnames(results$summary)
-#   z <- intersect(apc, y)
-#   results$summary <- results$summary[z]
-#   return(results)
-# }
-# 
-# # Calls previously defined functions to output complete model summaries
-# Workflow <- function(Project, Taxa, Model) {
-#   # # Create community matrix for all taxa, all programs
-#   # # for colonization potential index (CPI) influence factor
-#   # p <- unique(inv$MonitoringProgram)
-#   # p <- p[!p %in% "VD_old"]
-#   # data <- filter(inv, MonitoringProgram %in% p & !is.na(inv[, get(Taxa)]))
-#   # cc <- complete.cases(data[, Taxa, with = FALSE])
-#   # wcm <- data[cc, ]
-#   # wcm <- CC(wcm, Taxa, "PA")
-#   # wcm <- as.data.frame(wcm)
-#   # rm(p, data, cc)
-#   
-#   # Workflow: SelectData, CC, RunModel, ExtractGLM, AddTaxa, SortCol
-#   dt <- SelectData(Project, Taxa)
-#   comm <- CC(dt, Taxa, "PA")
-#   if (Model == "GLM") {
-#     m <- RunModel(comm, predictors, 0.05, "GLM")
-#     m$summary <- ExtractGLM(m, Taxa)
-#     m$summary <- AddTaxa(dt, m, Taxa)
-#     m <- SortCol(m)
-#   }
-#   if (Model == "GAM") {
-#     m <- RunModel(comm, predictors, 0.05, "GAM")
-#     m$summary <- ExtractGAM(m, Taxa)
-#   }
-#   return(m)
-# }
-
-# # Plot overall probability of taxa by presence-absence
-# plotGLM <- function(results, Taxa, fileName) {
-#   pdf(paste("outputs/", fileName, ".pdf", sep=''), onefile = TRUE)
-#   
-#   mdt <- data.table()
-#   taxa <- results$summary[, Taxa]
-#   for (i in 1:length(taxa)){
-#     # For the given taxa and set of models, get the correct model
-#     pos <- match(taxa[i], results$taxa$Taxa)
-#     m <- results$models[[pos]]
-#     
-#     fv <- m$fitted.values
-#     
-#     # Tidy the DF for plotting
-#     dt <- results$mdata
-#     dt <- na.omit(dt)
-#     dt <- cbind(dt, fv)
-#     dt <- select(dt, SiteId, eval(as.symbol(taxa[i])), fv)
-#     colnames(dt) <- c("SiteId", "Observed", "Predicted")
-#     mdt <- rbind(mdt, dt)
-#   }
-#   title <- "Overall probability versus observation"
-#   yaxis <- "Overall probability"
-#   xaxis <- "Observed presence-absence"
-#   
-#   # par(cex.lab=1.5, cex.axis=1.5, cex.main=1.5, mar = c(5,5,5,5))
-#   # par(mar = c(5,5,5,5))
-#   boxplot(Predicted ~ Observed, data = mdt, 
-#           main = title, ylab = yaxis, xlab = xaxis, cex.names = 2, ylim=c(0,1))
-#   dev.off()
-# }
-# 
-# # Based on plotSDM(): prints boxplots of predicted probabilities for significant taxa, one taxa per page
-# plotGLMs <- function(results, Taxa, fileName) {
-#   
-#   taxa <- results$summary[, Taxa]
-#   page <- 1
-#   
-#   pdf(paste("output/", fileName, ".pdf", sep=''), onefile = TRUE)
-#   
-#   for (i in 1:length(taxa)){
-#     # For the given taxa and set of models, get the correct model
-#     pos <- match(taxa[i], results$taxa$Taxa)
-#     m <- results$models[[pos]]
-#     
-#     fv <- m$fitted.values
-#     
-#     # Tidy the DF for plotting
-#     dt <- results$mdata
-#     dt <- na.omit(dt)
-#     dt <- cbind(dt, fv)
-#     dt <- select(dt, SiteId, eval(as.symbol(taxa[i])), fv)
-#     colnames(dt) <- c("SiteId", "Observed", "Predicted")
-#     
-#     title <- paste(page, " - Modelled presence-absence of",paste(taxa[i]))
-#     yaxis <- "Model probability"
-#     xaxis <- "Observed presence-absence"
-#     cat("Plotting taxa: ", taxa[i], "\n")
-#     page <- page + 1
-#     par(cex.lab=1.5, cex.axis=1.5, cex.main=1.5, mar = c(5,5,5,5))
-#     boxplot(Predicted ~ Observed, data = dt, 
-#             main = title, ylab = yaxis, xlab = xaxis, cex.names = 2, ylim=c(0,1))
-#   }
-#   dev.off()
-# }
-# 
-# # Plot GAM splines for all taxa, one taxa per page
-# plotGAMs <- function(results, fileName) {
-#   t <- results$taxa
-#   taxa <- t$Taxa
-#   page <- 1
-#   
-#   pdf(paste("outputs/", fileName, ".pdf", sep=''), paper = 'special', width = 12, height = 9, onefile = TRUE)
-#   
-#   for (i in 1:length(taxa)){
-#     x <- which(results$taxa$Taxa == taxa[i])
-#     m <- results$models[[x]]
-#     page <- page + 1
-#     cat("Plotting taxa: ", taxa[i], "\n")
-#     title <- paste("Spline", taxa[i])
-#     plot.gam(m, pages = 1, main = title)
-#   }
-#   dev.off()
-# }
-# 
-# # Plot GAM splines for one taxa
-# plotGAM <- function(results, Organism) {
-#   x <- which(results$taxa$Taxa == Organism)
-#   m <- results$models[[x]]
-#   plot.gam(m, pages = 1)
-# }
-# 
-
-map.jsdm.pred.taxon <- function(results, taxon, legend=TRUE){
+map.jsdm.pred.taxon <- function(jsdm, taxon, legend=TRUE){
   # Get predicted probabilities with default quantiles c(0.05, 0.95)
-  dt <- propogate.jsdm.pred(results, get.quantiles = TRUE) 
+  dt <- propogate.jsdm.pred(jsdm, get.quantiles = TRUE) 
   dt <- left_join(dt, inputs$xy, by="SiteId")
-  setDT(dt)
-  
+
   # Format data for ggplot() aesthetics
   dt <- na.omit(dt)
   dt$Obs <- as.factor(dt$Obs)
@@ -3519,22 +2969,25 @@ map.jsdm.pred.taxon <- function(results, taxon, legend=TRUE){
   
   taxon.label <- sub("_", " ", taxon)
   
-  plot.data <- dt[Taxon==taxon, ]
+  plot.data <- filter(dt, Taxon == taxon)
+  
   # Map geometries
   g <- ggplot()
   g <- g + geom_sf(data = inputs$ch, fill=NA, color="black")
   g <- g + geom_point(data = plot.data, aes(X, Y, size = Pred, alpha = Alpha, color = Obs, stroke = Stroke, shape = Shape))
   
   # Configure theme and labels
-  g <- g + theme_minimal(base_size = 15)
+  g <- g + theme_void(base_size = 15)
   g <- g + theme(plot.title = element_text(hjust = 0.5),
-                 axis.title.x = element_blank(),
-                 axis.title.y = element_blank(),
-                 axis.text.x = element_blank(),
-                 axis.text.y = element_blank(),
-                 panel.grid.major = element_line(colour="transparent"),
-                 plot.margin = unit(c(0.1,0.1,0.1,0.1), "lines"))
+                 panel.grid.major = element_line(colour="transparent"))
   
+  # g <- g + scale_y_continuous(breaks=NULL)
+  # g <- g + scale_x_continuous(breaks=NULL)
+  # g <- g + guides(colour = guide_legend(override.aes = list(size=6)))
+  # g <- g + theme_minimal()
+  # g <- g + labs(main = paste("Trial:", trial,"| Variable:", variable),
+  #               x = "",
+  #               y = "")
   g <- g + labs(title = taxon.label,
                 x = "",
                 y = "",
@@ -3546,8 +2999,6 @@ map.jsdm.pred.taxon <- function(results, taxon, legend=TRUE){
   g <- g + guides(size = guide_legend(override.aes = list(color="black", stroke=0), order=1),
                   alpha = guide_legend(override.aes = list(size=6, shape=c(19,21), stroke=c(0,0.75), color="black"), order=2),
                   color = guide_legend(override.aes = list(size=6, stroke=0), order=3))
-  g <- g + scale_y_continuous(breaks=NULL)
-  g <- g + scale_x_continuous(breaks=NULL)
   g <- g + scale_radius(limits = c(0,1), breaks = seq(0, 1, 0.2), range = c(2, 6))
   g <- g + scale_color_manual(values=c("0" = "#FF0000", "1" = "#0077FF"), labels=c("Absence", "Presence"))
   g <- g + scale_alpha_manual(values=c("0.65"="0.65", "0.35"="0.35"), labels=c("5th quantile", "95th quantile"))
@@ -3560,19 +3011,19 @@ map.jsdm.pred.taxon <- function(results, taxon, legend=TRUE){
 }
 # # Plot map of influence factors (0-100)
 # # Requires: predictors, inputs$ch, inputs$xy, inv
-map.inputs <- function(x, fileName) {
+map.inputs <- function(data, fileName) {
   # Get predictor names without "SiteId"
-  variables <- unique(x$Variable)
+  variables <- unique(data$Variable)
   variables <- variables[variables != "Temp2"]
-  x <- left_join(x, inputs$xy, by = "SiteId")
-  setDT(x)
+  data <- left_join(data, inputs$xy, by = "SiteId")
+  setDT(data)
   pdf(paste(fileName, ".pdf", sep=''), paper = 'special', width = 11, onefile = TRUE)
-  trials <- unique(x$Trial)
+  trials <- unique(data$Trial)
   for (t in 1:length(trials)){
     trial <- trials[t]
     for (k in 1:length(variables)){
       variable <- variables[k]
-      plot.data <- x[Trial == trial & Variable == variable,]
+      plot.data <- data[Trial == trial & Variable == variable,]
       
       # Set up scales
       k.min <- round(min(plot.data[["Value"]], na.rm = T), 1)
@@ -3582,19 +3033,20 @@ map.inputs <- function(x, fileName) {
       g <- ggplot()
       g <- g + geom_sf(data = inputs$ch, fill=NA, color="black")
       g <- g + geom_point(data = plot.data, aes(X, Y, size = Value), alpha = 0.35)
-      # g <- g + scale_size_continuous(name = variable, limits = c(k.min, k.max), breaks = seq(k.min, k.max, k.int), range = c(2, 7))
       g <- g + scale_radius(name = variable, limits = c(k.min, k.max), breaks = seq(k.min, k.max, k.int), range = c(2, 7))
-      g <- g + scale_colour_brewer(palette = "Set1")
+      g <- g + geom_sf(data = inputs$rivers.major, fill=NA, color="lightblue", show.legend = FALSE)
+      g <- g + geom_sf(data = inputs$lakes.major, fill="lightblue", color="lightblue", show.legend = FALSE)
       
-      g <- g + theme(panel.grid.major = element_line(colour="transparent"))
-      # Plot titles and labels
-      g <- g + scale_y_continuous(breaks=NULL)
-      g <- g + scale_x_continuous(breaks=NULL)
+      g <- g + theme_void(base_size = 15)
+      
+      g <- g + theme(plot.title = element_text(hjust = 0.5),
+                     panel.grid.major = element_line(colour="transparent"),
+                     plot.margin = unit(c(0.1,0.1,0.1,0.1), "lines"))
+      
+      g <- g + scale_colour_brewer(palette = "Set1")
       g <- g + guides(colour = guide_legend(override.aes = list(size=6)))
-      g <- g + theme_minimal()
-      g <- g + labs(main = paste("Trial:", trial,"| Variable:", variable),
-                    x = "",
-                    y = "")
+      # g <- g + labs(main = paste("Trial:", trial,"| Variable:", variable))
+      g <- g + labs(main = paste("Variable: ", variable))
       cat("Plotting: ", trial,"/ ", variable, "\n")
       print(g)
     }
@@ -3604,7 +3056,6 @@ map.inputs <- function(x, fileName) {
 }
 
 # Other plots ####
-
 plot.trace <- function(directory = 'outputs/paper 1 extensions', folder){
   cat("Load image: ", folder, " -> | ")
   
@@ -3843,7 +3294,7 @@ plot.commcorr <- function(jsdm){
 # Given output from extract.jsdm(), plot community and taxon-specific parameters (and priors)
 plot.comm <- function(jsdm, filename){
   # ALPHA #
-  alpha.taxa <- jsdm$alpha_taxa
+  alpha.taxa <- jsdm$alpha.taxa
   colnames(alpha.taxa) <- colnames(jsdm$occur.taxa)
   # alpha.taxa <- melt(alpha.taxa, variable.factor = FALSE)
   # colnames(alpha.taxa) <- c("Taxon", "Value")
@@ -3855,7 +3306,8 @@ plot.comm <- function(jsdm, filename){
   alpha.taxon <- alpha.taxa[, names(which.min(alpha.sd))]
   ymax <- max(density(alpha.taxon)$y)
   # mu_alpha_comm ~ normal(mu_alpha_comm_pripar,sigma_alpha_comm_pripar)
-  prior <- density(rnorm(length(jsdm$lp__), mean=jsdm$mu_alpha_comm_pripar, sd=jsdm$sigma_alpha_comm_pripar))
+  chain.length <- length(jsdm$mu.alpha.comm)
+  prior <- density(rnorm(chain.length, mean=jsdm$mu.alpha.comm.pripar, sd=jsdm$sigma.alpha.comm.pripar))
   
   mu <- jsdm$mu.alpha.comm.maxpost
   sd <- jsdm$sigma.alpha.comm.maxpost
@@ -3884,16 +3336,10 @@ plot.comm <- function(jsdm, filename){
   lines(x, alpha.comm, type="l",  col = "grey50", lwd = 5)
   
   # BETA #
-  beta.samples <- jsdm$beta_taxa
-  dimnames(beta.samples) <- list(1:dim(beta.samples)[1], jsdm$inf.fact, colnames(jsdm$occur.taxa)) # name the dimensions
-  taxon.samples <- melt(beta.samples)
-  colnames(taxon.samples) <- c("Sample", "Variable", "Taxon", "Value")
-  taxon.samples <- setDT(taxon.samples)
-  taxon.samples$Variable <- as.character(taxon.samples$Variable)
-  taxon.samples$Taxon <- as.character(taxon.samples$Taxon)
-  
+  taxon.samples <- extract.beta(jsdm)
+
   # Get SD by variable, taxon
-  beta.taxa.sd <- apply(beta.samples, c(2,3), sd)
+  beta.taxa.sd <- apply(jsdm$beta.taxa, c(2,3), sd)
   
   for (k in 1:length(jsdm$inf.fact)){
     variable <- jsdm$inf.fact[k]
@@ -3921,7 +3367,8 @@ plot.comm <- function(jsdm, filename){
                 "bFRI" = expression(paste(beta["bFRI"], " (1/%)")),
                 "FRI" = expression(paste(beta["FRI"], " (1/%)")),
                 "F10m" = expression(paste(beta["F10m"], " (1/%)")),
-                "IAR" = expression(paste(beta["IAR"], " 1/(spray treatments * fraction cropland)")),
+                "F100m" = expression(paste(beta["F100m"], " (1/%)")),
+                "IAR" = expression(paste(beta["IAR"], " 1/(w"["c"]%*%"f"["c"],")")),
                 "Urban" = expression(paste(beta["Urban"], " (1/%)")),
                 "LUD" = expression(paste(beta["LUD"], " (km"^2,"/CE)"))
     )
@@ -3966,15 +3413,15 @@ plot.comm <- function(jsdm, filename){
 }
 
 # Plot probabilities versus influence factors for each taxon, given extract.jsdm() or run.isdm() output object
-plot.prob <- function(results, filename){
+plot.prob <- function(result, filename){
   # Detect whether jSDM argument is a collection of iSDMs or a jSDM,
   # create objects for preparation of inputs 
-  if ("models" %in% names(results)){
-    K <- results$inf.fact
-    y <- data.table(SiteId = results$mdata$SiteId, SampId = results$mdata$SampId)
+  if ("models" %in% names(result)){
+    K <- result$inf.fact
+    y <- tibble(SiteId = result$mdata$SiteId, SampId = result$mdata$SampId)
   }else{
-    K <- results$inf.fact
-    y <- data.table(SiteId = results$sites, SampId = results$samples)
+    K <- result$inf.fact
+    y <- tibble(SiteId = result$sites, SampId = result$samples)
   }
   
   inputs <- prepare.inputs(K, y, center = FALSE)
@@ -3986,20 +3433,20 @@ plot.prob <- function(results, filename){
   levels(inputs$Label) <- labeller(levels(inputs$Label))
   
   # Join input data to probabilities
-  prob <- left_join(results$probability, inputs, by=c("SiteId", "SampId"))
+  prob <- left_join(result$probability, inputs, by=c("SiteId", "SampId"))
   prob$Obs <- as.factor(prob$Obs)
   setDT(prob); setkey(prob, Taxon)
   
   # Prepare taxa/D2 statistics
-  results$deviance <- arrange(results$deviance, -n)
-  taxa <- results$deviance$Taxon
-  d <- results$deviance$D2; names(d) <- taxa
+  result$deviance <- arrange(result$deviance, -n.present)
+  taxa <- result$deviance$Taxon
+  d <- result$deviance$D2; names(d) <- taxa
   
   pdf(paste(filename, '.pdf', sep=''), paper = 'special', height = 9, width = 12, onefile = TRUE)
   for (j in 1:length(taxa)){
     taxon <- taxa[j]
     d.squared <- round(d[taxon], 2)
-    taxon.prob <- prob[Taxon == taxon, ]
+    taxon.prob <- prob[Taxon==taxon,]
     
     g <- ggplot(data = taxon.prob, aes(x = Value, y = Pred, color = Obs))
     g <- g + geom_point(alpha = 0.25)
@@ -4021,15 +3468,15 @@ plot.prob <- function(results, filename){
 }
 
 # Plot probabilities versus influence factors for specific taxon, given extract.jsdm() or run.isdm() output object
-plot.prob.taxon <- function(results, taxon, legend=TRUE){
-  # Detect whether "results" argument is a collection of iSDMs or a jSDM,
+plot.prob.taxon <- function(jsdm, taxon, legend=FALSE){
+  # Detect whether "jsdm" argument is a collection of iSDMs or a jSDM,
   # create objects for preparation of inputs 
   if ("models" %in% names(jsdm)){
     K <- jsdm$inf.fact
-    y <- data.table(SiteId = jsdm$mdata$SiteId, SampId = jsdm$mdata$SampId)
+    y <- tibble(SiteId = jsdm$mdata$SiteId, SampId = jsdm$mdata$SampId)
   }else{
     K <- jsdm$inf.fact
-    y <- data.table(SiteId = jsdm$sites, SampId = jsdm$samples)
+    y <- tibble(SiteId = jsdm$sites, SampId = jsdm$samples)
   }
   
   # Prepare inputs and reshape into tidy data
@@ -4046,7 +3493,7 @@ plot.prob.taxon <- function(results, taxon, legend=TRUE){
   prob$Obs <- as.factor(prob$Obs)
   setDT(prob)
   
-  taxon.prob <- prob[Taxon == taxon, ]
+  taxon.prob <- filter(prob, Taxon==taxon)
   taxon.label <- sub("_", " ", taxon)
   
   g <- ggplot(data = taxon.prob, aes(x = Value, y = Pred, color = Obs))

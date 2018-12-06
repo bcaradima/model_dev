@@ -14,19 +14,19 @@ View(vs.bdms.mean)
 
 # write.csv(vs.bdms.mean, 'outputs/variable_selection/bdms_transformed/vs_bdms_mean.csv', row.names = FALSE)
 
-vs.bdms.ut <- extract.vsr("variable_selection/bdms_untransformed", sample.bdms)
+vs.bdms <- extract.vsr("variable_selection/bdms_untransformed", sample.bdms)
 
 # Get mean relative deviance for each model over entire community (excluding rare taxa)
-vs.bdms.mean.ut <- vs.bdms.ut %>%
+vs.bdms.mean <- vs.bdms %>%
   filter(!is.infinite(rdev.test) & n > 56) %>%
   group_by(Model) %>%
   summarise(mrd.train = mean(rdev.train, na.rm=TRUE), mrd.test = mean(rdev.test, na.rm=TRUE)) %>%
   arrange(mrd.test) %>%
   mutate(Parameters = vapply(strsplit(Model, " "), length, integer(1)))
 
-View(vs.bdms.mean.ut)
+View(vs.bdms.mean)
 
-# write.csv(vs.bdms.mean.ut, 'outputs/variable_selection/bdms_untransformed/vs_bdms_mean_ut.csv', row.names = FALSE)
+write.csv(vs.bdms.mean[1:10,], 'outputs/variable_selection/bdms_untransformed/vs_bdms_mean_ut.csv', row.names = FALSE)
 
 test <- filter(vs.bdms.mean.ut, !grepl('SS1|SS2|SS3', Model))
 
@@ -57,7 +57,7 @@ test <- filter(vs.bdms.mean.ut, !grepl('SS1|SS2|SS3', Model))
 plot.data <- vs.bdms.mean %>%
   arrange(Parameters) %>%
   group_by(Parameters) %>%
-  mutate(Label = paste(Parameters, " parameters (", formatC(uniqueN(Model), big.mark=",")," models)", sep="")) %>%
+  mutate(Label = paste(Parameters, " (", formatC(uniqueN(Model), big.mark=",")," models)", sep="")) %>%
   ungroup() %>%
   mutate(Label = factor(Label, levels = unique(Label)))
 
@@ -104,16 +104,17 @@ g <- g + labs(title = "Mean standardized deviance (MSD) of prediction vs calibra
 g <- g + guides(colour = guide_legend(override.aes = list(size=6)))
 print(g)
 
-plot.data <- filter(plot.data, Parameters < 11)
+# plot.data <- filter(plot.data, Parameters < 11)
 g <- ggplot(plot.data, aes(x = mrd.train, y = mrd.test, color = as.factor(Label)))
 g <- g + geom_point(alpha=0.35)
 # g <- g + geom_density2d(aes(x=mrd.train, y=mrd.test, color = as.factor(Label)))
 g <- g + geom_abline(intercept = 0, slope = 1, color="black", size=1.25, alpha = 0.4)
 g <- g + theme_bw(base_size = 17)
+# g <- g + theme_gray(base_size = 17) # gray improves contrast
 g <- g + labs(title = "Predictive deviance vs calibration deviance",
               y = "Mean standardized deviance during prediction",
               x = "Mean standardized deviance during calibration",
-              color = "Number of Parameters")
+              color = "Number of\nparameters")
 g <- g + theme(plot.title=element_blank())
 g <- g + guides(colour = guide_legend(override.aes = list(size=6)))
 g <- g + scale_colour_brewer(palette = "Set1")

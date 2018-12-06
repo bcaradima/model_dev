@@ -1,5 +1,5 @@
 ### SETUP ####
-# Description: this script loads and installs packages, sources the functions script, and reads input data. This script is not meant to modify or pre-process the input data in any way; this is done by the inputs.R script
+# Description: this script loads and installs packages, sources the functions script, and reads input data. This script is not meant to modify or pre-process the input data; this is done by the inputs.R script
 
 # Setup: requires project in root folder with:
 # all input data in /inputs directory, 
@@ -8,10 +8,10 @@
 
 source('scripts/functions.R')
 
-# Install and load packages
+# Load packages and install if necessary with ipak()
 # Tidyverse packages and data.table for data processing, mgcv (GAMs), rgdal (spatial data), doParallel (parallel computing), rstan and coda for Bayesian inference, crayon for colored console outputs (helpful but unnecessary), scales/e1071/MASS/quantreg for miscallaneous functions
 # Plotting libraries: data.tree, networkD3, ggridges, ggpubr
-ipak(c("tidyverse", "data.table", "car", "psych", "doParallel", "coda", "rstan", "scales", "e1071", "MASS", "crayon", "rgdal", "networkD3", "sf", "data.tree", "plotly", "ggridges", "ggpubr", "cowplot", "svglite")) # "mgcv", "quantreg"
+ipak(c("tidyverse", "data.table", "car", "psych", "doParallel", "coda", "rstan", "scales", "e1071", "MASS", "crayon", "rgdal", "sf", "plotly", "ggridges", "ggpubr", "cowplot", "svglite")) # "mgcv", "quantreg"
 
 options(stringsAsFactors = FALSE)
 options(scipen=999)
@@ -29,7 +29,23 @@ rescale <- scales::rescale
 inputs = list()
 # Invertebrates ####
 inv <- read.csv('inputs/invertebrates_2017-04-20.dat', sep='\t', header=TRUE, na.strings="", stringsAsFactors=FALSE)
+
+
+# Taxonomy ####
 inputs$taxonomy <- read.csv('inputs/invertebrates_taxonomy_2018-02-23.dat', sep='\t', header=TRUE, stringsAsFactors=FALSE, na.strings=c(""," ","NA"))
+inputs$taxonomy <- data.table(inputs$taxonomy)
+
+# Add missing taxonomic data for Drusus_manticola, Baetis_niger, Baetis_nexus
+species <- rbind(c("Arthropoda", "Insecta", "Trichoptera", "Limnephilidae", "Drusus", "monticola"), 
+                 c("Arthropoda", "Insecta", "Ephemeroptera", "Baetidae", "Baetis", "niger"),
+                 c("Arthropoda", "Insecta", "Ephemeroptera", "Baetidae", "Baetis", "nexus"))
+species <- data.table(species)
+colnames(species) <- c("Phylum", "Class", "Order", "Family", "Genus", "Species")
+inputs$taxonomy <- bind_rows(inputs$taxonomy, species)
+rm(species)
+
+# Modify $Species so it's identical to BDM column names
+inputs$taxonomy$Species <- ifelse(!is.na(inputs$taxonomy$Species), paste(inputs$taxonomy$Genus, inputs$taxonomy$Species, sep="_"), NA)
 
 # Coordinates for sites and borders of Switzerland
 inputs$ch <- st_read("inputs/workspace.gdb", layer="switzerland", stringsAsFactors = F)
