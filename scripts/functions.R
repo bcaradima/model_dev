@@ -80,7 +80,8 @@ labeller <- function(inf.fact){
               "FRI" = expression(paste("FRI (%)")),
               "bFRI" = expression(paste("bFRI (%)")),
               
-              "IAR" = expression(paste("IAR (w"["c"]%*%"f"["c"],")")),
+              # "IAR" = expression(paste("IAR (w"["c"]%*%"f"["c"],")")),
+              "IAR" = expression(paste("IAR")),
               "WV" = expression(paste("WV")),
               "Urban" = expression(paste("Urban (%)")),
               "LUD" = expression(paste("LUD (CE/km"^2,")"))
@@ -455,7 +456,9 @@ select.isdm <- function(results, taxon) {
 }
 
 # Cross-validation ####
-# Returns list of deviances and probabilities from GLMs under k-fold cross-validation (k=3); requires only predictors as argument, with sample.bdms and train/test data assumed to be in the workspace
+# Returns list of deviances and probabilities from GLMs under k-fold cross-validation (k=3); requires only predictors as argument
+# Assumes sample.bdms is in the environment
+# Assumes k-fold sample data (e.g., train1, test1) are in the environment
 cv.isdm <- function(predictors){
   cat("Starting k-fold cross-validation of GLMs:\n")
   output <- list("deviance" = list(), "probability" = list())
@@ -573,163 +576,91 @@ cv.isdm <- function(predictors){
   return(output)
 }
 
-# cv.isdm <- function(predictors){
-#   # Fit the iSDMs to the training data
-#   cat("Training iSDMs -> | ")
-#   bdm.1 <- run.isdm(train1, predictors, messages = FALSE)
-#   bdm.2 <- run.isdm(train2, predictors, messages = FALSE)
-#   bdm.3 <- run.isdm(train3, predictors, messages = FALSE)
-#   
-#   # Extract the predictions for the training data
-#   bdm.1$probability$Fold <- 1
-#   bdm.2$probability$Fold <- 2
-#   bdm.3$probability$Fold <- 3
-#   
-#   train.probability <- bind_rows(bdm.1$probability, bdm.2$probability, bdm.3$probability)
-#   train.probability$Type <- "Training"
-#   
-#   # Perform predictions on corresponding independent data; obtain predicted outcomes and deviance statistics
-#   cat("Extract -> | ")
-#   train.deviance <- lapply(1:3, function(fold){
-#     isdm <- get(paste("bdm.",fold,sep=""))
-#     
-#     # TRAINING
-#     # Tidy training statistics for output
-#     train.deviance <- tibble(Taxon = names(isdm$taxa),
-#                              # Statistics
-#                              null.deviance = isdm$deviance$null.dev,
-#                              residual.deviance = isdm$deviance$res.dev,
-#                              std.deviance = isdm$deviance$res.dev / isdm$deviance$n.samples,
-#                              D2 = isdm$deviance$D2,
-#                              # Sample information
-#                              n.samples = isdm$deviance$n.samples,
-#                              n.present = isdm$taxa,
-#                              # Validation information
-#                              Type = "Training",
-#                              Fold = fold,
-#                              Model = "iSDM",
-#                              stringsAsFactors = F)
-#     
-#     train.deviance <- train.deviance[, c("Taxon", "Type", "Fold", "Model", "null.deviance", "residual.deviance", "std.deviance", "D2", "n.samples", "n.present")]
-#   })
-#   train.deviance <- bind_rows(train.deviance)
-#   
-#   # TESTING
-#   cat("Testing -> |")
-#   cv <- lapply(1:3, function(fold){
-#     # Prepare input/output data
-#     test.data <- as.tibble(get(paste("test", fold, sep = ""))) # get test data corresponding to fold
-#     taxa <- names(isdm$taxa) # get names of taxa in training data
-#     test.data <- test.data[, c("SiteId", "SampId", taxa)] # only keep taxa found in training
-#     inf.fact <- isdm$inf.fact
-#     
-#     # Calculate intercepts from test data
-#     n.present <- occur.freq(test.data)
-#     n.total <- apply(select(test.data, -SiteId, -SampId), 2, function(j){
-#       sum(!is.na(j), na.rm = TRUE)
-#     })
-#     
-#     freq <- n.present/n.total
-#     freq <- ifelse(freq==0, 1e-04, freq)
-#     alpha.taxa <- -log(1/freq-1)
-#     
-#     # get predictions to calculate testing deviance for each taxa
-#     J <- lapply(taxa, function(j){
-#       m <- isdm$models[[j]]
-#       
-#       # prepare parameters for null model
-#       null.parameters <- c(alpha.taxa[j], rep(0, length(inf.fact)))
-#       
-#       # get the observations
-#       obs <- test.data[, c("SiteId", "SampId", j)]
-#       colnames(obs) <- c("SiteId", "SampId", "Obs")
-#       obs <- na.omit(obs)
-#       
-#       # join the inputs to the observations
-#       test.model.data <- left_join(obs, predictors, by = c("SiteId", "SampId"))
-#       test.model.data <- na.omit(test.model.data)
-#       
-#       test.y <- test.model.data[["Obs"]]
-#       test.x <- as.matrix(test.model.data[, inf.fact])
-#       
-#       # null deviance
-#       z <- null.parameters[1] + test.x%*%null.parameters[-1]
-#       test.p.null <- 1/(1+exp(-z))
-#       test.deviance.null.taxon <- sum(-2*log(ifelse(test.y==1, test.p.null, 1-test.p.null)), na.rm = TRUE)
-#       
-#       # residual deviance
-#       # calculate predicted probabilities
-#       if (m$optim){
-#         z <- m$par["Intercept"] + test.x%*%m$par[-1]
-#       }else{
-#         z <- coef(m)["(Intercept)"] + test.x %*% coef(m)[inf.fact]
-#       }
-#       z <- as.vector(z)
-#       test.p.resid <- 1/(1+exp(-z))
-#       
-#       # calculate deviance statistics
-#       test.deviance.resid.taxon <- sum(-2*log(ifelse(test.y == 1, test.p.resid, 1-test.p.resid)), na.rm = TRUE)
-#       
-#       test.deviance <- tibble(Taxon = j,
-#                    # Statistics
-#                    null.deviance = test.deviance.null.taxon,
-#                    residual.deviance = test.deviance.resid.taxon,
-#                    std.deviance = test.deviance.resid.taxon/length(test.y),
-#                    D2 = (test.deviance.null.taxon - test.deviance.resid.taxon)/test.deviance.resid.taxon,
-#                    # Sample information
-#                    n.samples = length(test.y),
-#                    n.present = n.present[j],
-#                    # Group information
-#                    Type = "Testing",
-#                    Fold = fold,
-#                    Model = "iSDM")
-#       
-#       test.deviance <- test.deviance[, c("Taxon", "Type", "Fold", "Model", "null.deviance", "residual.deviance", "std.deviance", "D2", "n.samples", "n.present")]
-# 
-#       test.probability <- tibble(SiteId = test.model.data$SiteId, 
-#                    SampId = test.model.data$SampId, 
-#                    Pred = test.p.resid, 
-#                    Taxon = j, 
-#                    Model = "iSDM",
-#                    Fold = fold,
-#                    Type = "Testing")
-#       
-#       test.probability <- left_join(test.probability, obs, by = c("SiteId", "SampId"))
-#       test.probability <- test.probability[, colnames(train.probability)]
-#       
-#       output <- list("probability" = test.probability, "deviance" = test.deviance)
-#       return(output)
-#     })
-#     
-#     # Bind results within each fold
-#     deviance <- lapply(J, function(i){i[[2]]})
-#     deviance <- bind_rows(deviance)
-#     
-#     probability <- lapply(J, function(i){i[[1]]})
-#     probability <- bind_rows(probability)
-#     
-#     output <- list("probability" = probability, "deviance" = deviance)
-#     return(output)
-#   })
-#   
-#   # Bind results across the folds
-#   test.deviance <- lapply(cv, function(i){i[[2]]})
-#   test.deviance <- bind_rows(test.deviance)
-#   
-#   test.probability <- lapply(cv, function(i){i[[1]]})
-#   test.probability <- bind_rows(test.probability)
-#   
-#   # Bind training and testing results
-#   deviance <- bind_rows(train.deviance, test.deviance)
-#   probability <- bind_rows(train.probability, test.probability)
-#   
-#   output <- list("probability" = probability, "deviance" = deviance)
-#   return(output)
-#   cat("| DONE\n")
-# }
+# Performs k-fold cross-validation of BDM samples based 
+# Assumes training and testing data are already in environment (e.g., train1/test1)
+# Assumes observed richness is already in workspace (richness.obs)
+cv.rm <- function(predictors){
+  output <- tibble()
+  f <- as.formula(paste("richness.obs~", paste(K, collapse="+")))
+  for (fold in 1:3){
+    cat("fold:", fold, "\n")
+    train.data <- as.tibble(get(paste("train",fold,sep="")))
+    test.data <- as.tibble(get(paste("test",fold,sep="")))
+    
+    # Observation data only for training/testing of family/species
+    train.richness.obs.family <- train.data %>%
+      select(SampId) %>%
+      left_join(filter(richness.obs, Rank=="Family"), by="SampId")
+    
+    train.richness.obs.species <- train.data %>%
+      select(SampId) %>%
+      left_join(filter(richness.obs, Rank=="Species"), by="SampId")
+    
+    test.richness.obs.family <- test.data %>%
+      select(SampId) %>%
+      left_join(filter(richness.obs, Rank=="Family"), by="SampId")
+    
+    test.richness.obs.species <- test.data %>%
+      select(SampId) %>%
+      left_join(filter(richness.obs, Rank=="Species"), by="SampId")
+    
+    # Complete observations and inputs for GLM calibration/prediction
+    train.family.model.data <-  train.richness.obs.family %>%
+      left_join(predictors, by="SampId")
+    
+    train.species.model.data <-  train.richness.obs.species %>%
+      left_join(predictors, by="SampId")
+    
+    test.family.model.data <- test.richness.obs.family %>%
+      left_join(predictors, by="SampId")
+    
+    test.species.model.data <-  test.richness.obs.species %>%
+      left_join(predictors, by="SampId")
+    
+    # Calibrate the GLMs using the training data
+    rmf <- glm.nb(f, data = train.family.model.data, link=log)
+    rms <- glm.nb(f, data = train.species.model.data, link=log)
+    
+    test.pred.family <- tibble(SampId = test.richness.obs.family$SampId,
+                               richness.obs = test.richness.obs.family$richness.obs,
+                               richness.pred = predict(rmf, newdata = test.family.model.data, type= "response"),
+                               Rank = "Family",
+                               Type = "Testing",
+                               Fold = fold,
+                               Trial = "Richness model")
+    
+    test.pred.species <- tibble(SampId = test.richness.obs.species$SampId,
+                                richness.obs = test.richness.obs.species$richness.obs,
+                                richness.pred = predict(rms, newdata = test.species.model.data, type= "response"),
+                                Rank = "Species",
+                                Type = "Testing",
+                                Fold = fold,
+                                Trial = "Richness model")
+    
+    train.pred.family <- tibble(SampId = train.family.model.data$SampId, 
+                                richness.obs = train.family.model.data$richness.obs,
+                                richness.pred = rmf$fitted.values,
+                                Rank = "Family",
+                                Type = "Training",
+                                Fold = fold,
+                                Trial = "Richness model")
+    
+    train.pred.species <- tibble(SampId = train.species.model.data$SampId, 
+                                 richness.obs = train.species.model.data$richness.obs,
+                                 richness.pred = rms$fitted.values,
+                                 Rank = "Species",
+                                 Type = "Training",
+                                 Fold = fold,
+                                 Trial = "Richness model")
+    output <- bind_rows(output, train.pred.family, train.pred.species, test.pred.family, test.pred.species)
+    
+  }
+  return(output)
+}
 
+# Performs k-fold cross-validation of hierarchical multi-species and joint SDMs using max. posterior, with conditional processing of model extensions (e.g., site effects, latent variables):
 # Extracts tidy calibration (training) data (probability, parameters, deviance), then performs prediction (testing)
-# against k-fold datasets. Warning: this function assumes a certain folder structure to read jSDM k-fold CV results
+# against k-fold datasets. Warning: this function assumes a certain folder structure to read results in a workspace
 cv.jsdm <- function(directory = "outputs/paper 1 extensions", folder) {
   require(mvtnorm)
   output = list("deviance" = data.table(), "probability" = data.table())
@@ -748,128 +679,132 @@ cv.jsdm <- function(directory = "outputs/paper 1 extensions", folder) {
     cat("Extract -> | ")
     
     # Stanfit object
-    res <- model.image$res
-    
-    # Peter's code START:
-    # correct chains for multiple local maxima of latent variables:
-    res.orig <- res
-    res.extracted.trace1 <- extract(res,permuted=FALSE,inc_warmup=FALSE)
-    
-    n.latent <- extensions$n.latent
-    n.chain <- model.image$n.chain
-    if ( extensions$n.latent > 1 ){
-      name.x        <- "x_lat"
-      name.beta     <- "beta_lat"
-      parnames      <- names(res@sim$samples[[1]])
-      ind.x         <- which(substring(parnames,1,nchar(name.x))==name.x)
-      ind.beta      <- which(substring(parnames,1,nchar(name.beta))==name.beta)
-      ind.notwarmup <- round(res@sim$warmup/res@sim$thin+1):round(res@sim$iter/res@sim$thin)
-      print("")
-      print(paste("n.latent",n.latent))
-      if ( n.latent == 1 )
-      {
-        n.x    <- length(ind.x)
-        
-        # calculate means of chain 1 at all sites
-        x.mean.1 <- rep(NA,length=n.x)
-        for ( i in 1:n.x ) x.mean.1[i] <- mean(res@sim$samples[[1]][[ind.x[i]]][ind.notwarmup])
-        if ( n.chain > 1 )  # adapt other chains to first:
-        {
-          for ( ch in 2:n.chain )  # match chains to first chain
-          {
-            print(paste("chain",ch))
-            # calculate means of chain ch at all sites
-            x.mean.ch <- rep(NA,length=n.x)
-            for ( i in 1:n.x ) x.mean.ch[i] <- mean(res@sim$samples[[ch]][[ind.x[i]]][ind.notwarmup])
-            dx.min.plus  <- sum(abs(x.mean.1-x.mean.ch))
-            dx.min.minus <- sum(abs(x.mean.1+x.mean.ch))
-            if ( dx.min.minus < dx.min.plus )
-            {
-              # change sign:
-              x.mean.ch <- -x.mean.ch
-              res@sim$samples[[ch]][[ind.x]]    <- -res@sim$samples[[ch]][[ind.x]]
-              res@sim$samples[[ch]][[ind.beta]] <- -res@sim$samples[[ch]][[ind.beta]]
-              print("sign changed")
-            }
-          }
-        }
-      }
-      else  # n.latent > 1
-      {
-        n.x.i    <- round(length(ind.x)/n.latent)
-        ind.x    <- matrix(ind.x,ncol=n.latent,byrow=FALSE)    # reformat ind.x
-        ind.beta <- matrix(ind.beta,ncol=n.latent,byrow=TRUE)  # reformat ind.beta
-        
-        # calculate means of chain 1 at all sites and for all latent variables
-        x.mean.1 <- matrix(NA,nrow=n.x.i,ncol=n.latent)
-        for ( i in 1:n.x.i )
-        {
-          for ( k in 1:n.latent ) x.mean.1[i,k] <- mean(res@sim$samples[[1]][[ind.x[i,k]]][ind.notwarmup])
-        }
-        
-        if ( n.chain > 1 )
-        {
-          for ( ch in 2:n.chain )  # match chains to first chain
-          {
-            print(paste("chain",ch))
-            # calculate means of chain ch at all sites and for all latent variables
-            x.mean.ch <- matrix(NA,nrow=n.x.i,ncol=n.latent)
-            for ( i in 1:n.x.i )
-            {
-              for ( k in 1:n.latent ) x.mean.ch[i,k] <- mean(res@sim$samples[[ch]][[ind.x[i,k]]][ind.notwarmup])
-            }
-            for ( k in 1:n.latent )  # match latent variables and signs
-            {
-              k.min <- k
-              plus.min <- TRUE 
-              dx.min.plus  <- sum(abs(x.mean.1[,k]-x.mean.ch[,k]))
-              dx.min.minus <- sum(abs(x.mean.1[,k]+x.mean.ch[,k]))
-              dx.min <- dx.min.plus
-              if ( dx.min.minus < dx.min.plus ) { plus.min <- FALSE; dx.min <- dx.min.minus }
-              if ( n.latent > k )
-              {
-                for ( kk in (k+1):n.latent )
-                {
-                  dx.min.plus  <- sum(abs(x.mean.1[,kk]-x.mean.ch[,kk]))
-                  dx.min.minus <- sum(abs(x.mean.1[,kk]+x.mean.ch[,kk]))
-                  if ( dx.min.plus  < dx.min ) { dx.min <- dx.min.plus;  plus.min <- TRUE; k.min <- kk }
-                  if ( dx.min.minus < dx.min ) { dx.min <- dx.min.minus; plus.min <- FALSE; k.min <- kk }
-                }
-              }
-              print(paste("k",k))
-              print(paste("k.min",k.min))
-              # exchange variables:
-              tmp <- x.mean.ch[,k.min]
-              x.mean.ch[,k.min] <- x.mean.ch[,k]
-              if ( plus.min ) x.mean.ch[,k] <-  tmp
-              else            x.mean.ch[,k] <- -tmp
-              for ( i in 1:nrow(ind.x) )
-              {
-                tmp <- res@sim$samples[[ch]][[ind.x[i,k.min]]]
-                res@sim$samples[[ch]][[ind.x[i,k.min]]] <- res@sim$samples[[ch]][[ind.x[i,k]]]
-                if ( plus.min ) res@sim$samples[[ch]][[ind.x[i,k]]] <-  tmp
-                else            res@sim$samples[[ch]][[ind.x[i,k]]] <- -tmp
-              }
-              print("exchange x completed")
-              for ( j in 1:nrow(ind.beta) )
-              {
-                tmp <- res@sim$samples[[ch]][[ind.beta[j,k.min]]]
-                res@sim$samples[[ch]][[ind.beta[j,k.min]]] <- res@sim$samples[[ch]][[ind.beta[j,k]]]
-                if ( plus.min ) res@sim$samples[[ch]][[ind.beta[j,k]]] <-  tmp
-                else            res@sim$samples[[ch]][[ind.beta[j,k]]] <- -tmp
-              }
-              print("exchange beta completed")
-            }
-          }
-        }
-      }
+    if("res.D1" %in% ls(model.image)){
+      res <- model.image$res.D1
+    } else{
+      res <- model.image$res
     }
     
-    # Extract the modified stanfit object
-    res.extracted.trace2 <- extract(res,permuted=FALSE,inc_warmup=FALSE)
-    res.extracted       <- extract(res,permuted=TRUE,inc_warmup=FALSE)
-    # Peter's code END
-    
+    # # Peter's code START:
+    # # correct chains for multiple local maxima of latent variables:
+    # res.orig <- res
+    # res.extracted.trace1 <- extract(res,permuted=FALSE,inc_warmup=FALSE)
+    # 
+    # n.latent <- extensions$n.latent
+    # n.chain <- model.image$n.chain
+    # if ( extensions$n.latent > 1 ){
+    #   name.x        <- "x_lat"
+    #   name.beta     <- "beta_lat"
+    #   parnames      <- names(res@sim$samples[[1]])
+    #   ind.x         <- which(substring(parnames,1,nchar(name.x))==name.x)
+    #   ind.beta      <- which(substring(parnames,1,nchar(name.beta))==name.beta)
+    #   ind.notwarmup <- round(res@sim$warmup/res@sim$thin+1):round(res@sim$iter/res@sim$thin)
+    #   print("")
+    #   print(paste("n.latent",n.latent))
+    #   if ( n.latent == 1 )
+    #   {
+    #     n.x    <- length(ind.x)
+    #     
+    #     # calculate means of chain 1 at all sites
+    #     x.mean.1 <- rep(NA,length=n.x)
+    #     for ( i in 1:n.x ) x.mean.1[i] <- mean(res@sim$samples[[1]][[ind.x[i]]][ind.notwarmup])
+    #     if ( n.chain > 1 )  # adapt other chains to first:
+    #     {
+    #       for ( ch in 2:n.chain )  # match chains to first chain
+    #       {
+    #         print(paste("chain",ch))
+    #         # calculate means of chain ch at all sites
+    #         x.mean.ch <- rep(NA,length=n.x)
+    #         for ( i in 1:n.x ) x.mean.ch[i] <- mean(res@sim$samples[[ch]][[ind.x[i]]][ind.notwarmup])
+    #         dx.min.plus  <- sum(abs(x.mean.1-x.mean.ch))
+    #         dx.min.minus <- sum(abs(x.mean.1+x.mean.ch))
+    #         if ( dx.min.minus < dx.min.plus )
+    #         {
+    #           # change sign:
+    #           x.mean.ch <- -x.mean.ch
+    #           res@sim$samples[[ch]][[ind.x]]    <- -res@sim$samples[[ch]][[ind.x]]
+    #           res@sim$samples[[ch]][[ind.beta]] <- -res@sim$samples[[ch]][[ind.beta]]
+    #           print("sign changed")
+    #         }
+    #       }
+    #     }
+    #   }
+    #   else  # n.latent > 1
+    #   {
+    #     n.x.i    <- round(length(ind.x)/n.latent)
+    #     ind.x    <- matrix(ind.x,ncol=n.latent,byrow=FALSE)    # reformat ind.x
+    #     ind.beta <- matrix(ind.beta,ncol=n.latent,byrow=TRUE)  # reformat ind.beta
+    #     
+    #     # calculate means of chain 1 at all sites and for all latent variables
+    #     x.mean.1 <- matrix(NA,nrow=n.x.i,ncol=n.latent)
+    #     for ( i in 1:n.x.i )
+    #     {
+    #       for ( k in 1:n.latent ) x.mean.1[i,k] <- mean(res@sim$samples[[1]][[ind.x[i,k]]][ind.notwarmup])
+    #     }
+    #     
+    #     if ( n.chain > 1 )
+    #     {
+    #       for ( ch in 2:n.chain )  # match chains to first chain
+    #       {
+    #         print(paste("chain",ch))
+    #         # calculate means of chain ch at all sites and for all latent variables
+    #         x.mean.ch <- matrix(NA,nrow=n.x.i,ncol=n.latent)
+    #         for ( i in 1:n.x.i )
+    #         {
+    #           for ( k in 1:n.latent ) x.mean.ch[i,k] <- mean(res@sim$samples[[ch]][[ind.x[i,k]]][ind.notwarmup])
+    #         }
+    #         for ( k in 1:n.latent )  # match latent variables and signs
+    #         {
+    #           k.min <- k
+    #           plus.min <- TRUE 
+    #           dx.min.plus  <- sum(abs(x.mean.1[,k]-x.mean.ch[,k]))
+    #           dx.min.minus <- sum(abs(x.mean.1[,k]+x.mean.ch[,k]))
+    #           dx.min <- dx.min.plus
+    #           if ( dx.min.minus < dx.min.plus ) { plus.min <- FALSE; dx.min <- dx.min.minus }
+    #           if ( n.latent > k )
+    #           {
+    #             for ( kk in (k+1):n.latent )
+    #             {
+    #               dx.min.plus  <- sum(abs(x.mean.1[,kk]-x.mean.ch[,kk]))
+    #               dx.min.minus <- sum(abs(x.mean.1[,kk]+x.mean.ch[,kk]))
+    #               if ( dx.min.plus  < dx.min ) { dx.min <- dx.min.plus;  plus.min <- TRUE; k.min <- kk }
+    #               if ( dx.min.minus < dx.min ) { dx.min <- dx.min.minus; plus.min <- FALSE; k.min <- kk }
+    #             }
+    #           }
+    #           print(paste("k",k))
+    #           print(paste("k.min",k.min))
+    #           # exchange variables:
+    #           tmp <- x.mean.ch[,k.min]
+    #           x.mean.ch[,k.min] <- x.mean.ch[,k]
+    #           if ( plus.min ) x.mean.ch[,k] <-  tmp
+    #           else            x.mean.ch[,k] <- -tmp
+    #           for ( i in 1:nrow(ind.x) )
+    #           {
+    #             tmp <- res@sim$samples[[ch]][[ind.x[i,k.min]]]
+    #             res@sim$samples[[ch]][[ind.x[i,k.min]]] <- res@sim$samples[[ch]][[ind.x[i,k]]]
+    #             if ( plus.min ) res@sim$samples[[ch]][[ind.x[i,k]]] <-  tmp
+    #             else            res@sim$samples[[ch]][[ind.x[i,k]]] <- -tmp
+    #           }
+    #           print("exchange x completed")
+    #           for ( j in 1:nrow(ind.beta) )
+    #           {
+    #             tmp <- res@sim$samples[[ch]][[ind.beta[j,k.min]]]
+    #             res@sim$samples[[ch]][[ind.beta[j,k.min]]] <- res@sim$samples[[ch]][[ind.beta[j,k]]]
+    #             if ( plus.min ) res@sim$samples[[ch]][[ind.beta[j,k]]] <-  tmp
+    #             else            res@sim$samples[[ch]][[ind.beta[j,k]]] <- -tmp
+    #           }
+    #           print("exchange beta completed")
+    #         }
+    #       }
+    #     }
+    #   }
+    # }
+    # 
+    # # Extract the modified stanfit object
+    # res.extracted.trace2 <- extract(res,permuted=FALSE,inc_warmup=FALSE)
+    # # Peter's code END
+
+    res.extracted       <- rstan::extract(res,permuted=TRUE,inc_warmup=FALSE)
     # Extract objects from workspace image and stanfit object
     sites <- model.image$sites # sites with complete predictors and non-zero taxa included in Stan model
     samples <- model.image$samples
@@ -1274,6 +1209,7 @@ cv.jsdm <- function(directory = "outputs/paper 1 extensions", folder) {
 # fold = 1
 # k=1
 
+# Performs k-fold cross-validation of hierarchical multi-species and joint SDMs using posterior sample, with conditional processing of model extensions (e.g., site effects, latent variables):
 cv.jsdm.sample <- function(directory = "outputs/paper 1 extensions", folder) {
   require(mvtnorm)
   # output = list("deviance" = tibble(), "probability" = tibble(), "richness" = tibble())
@@ -1390,6 +1326,9 @@ cv.jsdm.sample <- function(directory = "outputs/paper 1 extensions", folder) {
     ind.sel.eval <-  thin.eval*(1:floor(dim(alpha)[1]/thin.eval))
     sampsize.eval <- length(ind.sel.eval)
     
+    ind.sel.eval <- ind.sel.eval[1:500]
+    sampsize.eval <- 500
+    
     # Calculate null probabilities and deviances 
     # Same for all posterior samples? presumably yes, since no posterior parameter distributions are involved)
     train.p.null <- apply(train.y, 2, function(j){sum(j, na.rm=TRUE)/sum(!is.na(j))})
@@ -1481,8 +1420,23 @@ cv.jsdm.sample <- function(directory = "outputs/paper 1 extensions", folder) {
           # sample-specific latent variables
         } else{
           if ( extensions$n.latent == 1 ){
-            train.z[k,,] <- train.z[k,,] + x.lat[ind.sel.eval[k],] %*% beta.lat[ind.sel.eval[k],]
+            train.z[k,,] <- train.z[k,,] + sapply(beta.lat[ind.sel.eval[k],], function(i){ i * x.lat[ind.sel.eval[k],] })
+            # train.z[k,,] <- train.z[k,,] + x.lat[ind.sel.eval[k],] %*% beta.lat[ind.sel.eval[k],]
+            # dim(train.z[k,,])
+            # length(x.lat[ind.sel.eval[k],])
+            # length(beta.lat[ind.sel.eval[k],])
           } else{
+            # Modified chains and fixed posterior sample for TT2 returned error:
+            # Error in train.z[k, , ] + sapply(beta.lat[ind.sel.eval[k], , ], function(i) { : non-conformable arrays
+            # xb.lat <- sapply(beta.lat[ind.sel.eval[k],,], function(i){ i * x.lat[ind.sel.eval[k],,] })
+            # train.z[k,,] <- train.z[k,,] + xb.lat
+            
+            # dim(train.z)
+            # dim(beta.lat)
+            # dim(beta.lat[ind.sel.eval[k],,])
+            # dim(x.lat)
+            # dim(x.lat[ind.sel.eval[k],,])
+            
             train.z[k,,] <- train.z[k,,] + x.lat[ind.sel.eval[k],,] %*% beta.lat[ind.sel.eval[k],,]
           }
         }
@@ -1790,7 +1744,7 @@ identify.jsdm <- function(full.path){
   return(model.info)
 }
 
-# Extracts results of jSDM from folder containing workspace image (identified with identify.jsdm())
+# Extracts results of hierarchical multi-species and joint SDMs from folder containing workspace image (identified with identify.jsdm())
 # into one output (list of tidy data tables and model results)
 extract.jsdm <- function(directory = 'outputs/paper 1 extensions', folder) {
   # Store multiple model data results
@@ -2166,65 +2120,6 @@ extract.jsdm <- function(directory = 'outputs/paper 1 extensions', folder) {
   return(output)
 }
 
-plot.trace <- function(directory = "outputs/paper 1 extensions", folder){
-  full.path   <- paste(directory, folder, sep="/")
-  extensions <- identify.jsdm(full.path)
-  file.name.core <- extensions$workspace
-  
-  traceplot.nrow <- 10
-  traceplot.ncol <-  5
-  
-  if ( !require("corrplot") ) { install.packages("corrplot"); library("corrplot") }
-  if ( !require("ellipse") )  { install.packages("ellipse");  library("ellipse") }
-  if ( !require("psych") )    { install.packages("psych");    library("psych") }
-  if ( !require("coda") )     { install.packages("coda");     library("coda") }
-  if ( !require("rstan") )    { install.packages("rstan");    library("rstan") }
-  rstan_options(auto_write = TRUE)
-  options(mc.cores = parallel::detectCores())
-  
-  if ( !file.exists(paste(directory, folder,file.name.core,sep="/")) ){
-    print(paste("File: ",paste(directory, folder, file.name.core,sep="/"),"not found"))
-  } 
-  load(file=paste(full.path,"/",file.name.core,sep=""))
-  
-  res.orig <- res
-  res.extracted.trace1 <- extract(res,permuted=FALSE,inc_warmup=FALSE)
-  res.extracted.trace2 <- extract(res,permuted=FALSE,inc_warmup=FALSE)
-  res.extracted       <- extract(res,permuted=TRUE,inc_warmup=FALSE)
-  
-  mod.char <- matrix(c("Model",submodel),nrow=1)
-  mod.char <- rbind(mod.char,c("Number of taxa",ncol(occur.taxa)))
-  mod.char <- rbind(mod.char,c("Number of sites",n.sites))
-  mod.char <- rbind(mod.char,c("Number of samples",n.samples))
-  mod.char <- rbind(mod.char,c("Number of ext. influence factors",ncol(data$x)))
-  mod.char <- rbind(mod.char,c("Influence factors",paste(names(data$x),collapse=",")))
-  n.par <- 0
-  pars  <- ""
-  for ( i in 1:(length(res.extracted)-1)){
-    d <- dim(res.extracted[[i]])
-    n <- 1; if ( length(d)>1 ) n <- prod(d[-1]); n.par <- n.par+n
-    if ( nchar(pars)>0 ) pars <- paste(pars,",",sep="")
-    pars <- paste(pars,names(res.extracted)[i],"(",n,")",sep="")
-  }
-  mod.char <- rbind(mod.char,c("Number of parameters",n.par))
-  mod.char <- rbind(mod.char,c("Parameters",pars))
-  
-  dims <- dim(res.extracted.trace1)
-  pdf(paste(full.path,"/",folder,"_traces.pdf",sep=""),width=8,height=12)
-  par(mfrow=c(traceplot.nrow,traceplot.ncol),mar=c(2,2,2,0.5)+0.2) # c(bottom, left, top, right)
-  for ( i in 1:ceiling(length(names(res))/(traceplot.nrow*traceplot.ncol)) ){
-    start <- (i-1)*traceplot.nrow*traceplot.ncol+1
-    end   <- min(start+traceplot.nrow*traceplot.ncol-1,length(names(res)))
-    for ( j in start:end ){
-      plot(numeric(0),numeric(0),type="n",cex.axis=0.8,
-           xlim=c(0,dims[1]),ylim=range(res.extracted.trace1[,,j]),xlab="",ylab="",
-           main=dimnames(res.extracted.trace1)[[3]][j])
-      for ( k in 1:dims[2] ) lines(1:dims[1],res.extracted.trace1[,k,j],col=k)
-    }
-  }
-  dev.off()
-  return(mod.char)
-}
 # Return tidy, complete Variable Selection Results (VSR; no summary statistics are calculated)
 extract.vsr <- function(trial, sample){
   image <- new.env()
@@ -2235,7 +2130,7 @@ extract.vsr <- function(trial, sample){
   rm(image)
   
   # Get the standardized deviance over k-folds, for all parameters, all taxa, all models
-  d <- data.table()
+  d <- tibble()
   for (i in 1:length(output)){
     x <- output[[i]]
     
@@ -2262,7 +2157,7 @@ extract.vsr <- function(trial, sample){
   return(d)
 }
 
-# Propogate quantiles of a subsample of the posterior through the jSDM
+# Propogate quantiles of a posterior sample through the hmSDM
 # to obtain predicted probabilites based on 5th and 95th quantiles (default arguments)
 prop.jsdm.pred <- function(jsdm, get.quantiles=TRUE, quantiles=c(0.05, 0.95)){
   # Extract objects from workspace image to local environment
@@ -2289,7 +2184,7 @@ prop.jsdm.pred <- function(jsdm, get.quantiles=TRUE, quantiles=c(0.05, 0.95)){
   posterior.samples <- 1:nrow(alpha.taxa)
   subsample.size <- length(posterior.samples)*0.2
   
-  set.seed(2352)# ensure a reproducible random sample
+  set.seed(2352) # ensure a reproducible random sample
   subsample <- sample(posterior.samples, subsample.size, replace=FALSE)
   
   alpha.taxa.subsample <- alpha.taxa[subsample, ]
@@ -2769,6 +2664,7 @@ extract.beta <- function(jsdm){
   return(beta.samples)
 }
 
+# Calculate Tjur's coefficient of determination (R^2 for logistic regression)
 extract.tjur <- function(probability){
   result <- probability %>%
     group_by(Taxon, Obs) %>%
@@ -2848,7 +2744,7 @@ map.jsdm <- function(jsdm, fileName){
 
     # Configure theme and labels
     g <- g + labs(title = paste("Probability of occurrence vs observations of",paste(taxon)),
-                  subtitle = paste("jSDM: y ~", paste(jsdm$inf.fact, collapse=" ", sep = " "), "- page", j, "\nD2 = ", dj),
+                  subtitle = paste("mSDM UF0: y ~", paste(jsdm$inf.fact, collapse=" ", sep = " "), "- page", j, "\nD2 = ", dj),
                   size = "Probability of\noccurrence")
     g <- g + theme_void(base_size = 15)
     g <- g + theme(panel.grid.major = element_line(colour="transparent"))
@@ -2860,6 +2756,8 @@ map.jsdm <- function(jsdm, fileName){
   dev.off()
 }
 
+# Map maximum posterior probabilities of occurrence vs observations for specific taxon
+# Outputs a ggplot object
 map.jsdm.taxon <- function(jsdm, taxon, legend=FALSE){
   # Get probability/observations, deviance, and occurrence frequency for all taxa
   probability <- left_join(jsdm$probability, inputs$xy, by="SiteId")
@@ -2891,8 +2789,10 @@ map.jsdm.taxon <- function(jsdm, taxon, legend=FALSE){
   return(g)
 }
 
+# Map predicted probabilities of occurrence at 5th and 95th posterior quantiles for all taxa
+# Outputs a multi-page PDF
 map.jsdm.pred <- function(jsdm, fileName){
-  cat("Propogating posterior quantiles through joint model...\n")
+  cat("Propogating posterior quantiles through model...\n")
   dt <- prop.jsdm.pred(jsdm, get.quantiles=TRUE) # Get predicted probabilities with default quantiles c(0.05, 0.95)
   dt <- left_join(dt, inputs$xy, by="SiteId")
   setDT(dt)
@@ -2925,7 +2825,7 @@ map.jsdm.pred <- function(jsdm, fileName){
     
     # Configure themes and labels
     g <- g + labs(title = paste("Probability of occurrence vs observations of", taxon),
-                  subtitle = paste("jSDM:", paste(inf.fact, collapse = " ", sep = " "), "- page", j),
+                  subtitle = paste("mSDM UF0:", paste(inf.fact, collapse = " ", sep = " "), "- page", j),
                   x = "",
                   y = "",
                   size = "Probability of\noccurrence",
@@ -2954,9 +2854,11 @@ map.jsdm.pred <- function(jsdm, fileName){
   dev.off()
 }
 
-map.jsdm.pred.taxon <- function(jsdm, taxon, legend=TRUE){
+# Map predicted probabilities of occurrence at 5th and 95th posterior quantiles for specific taxon
+# Outputs a ggplot object
+map.jsdm.pred.taxon <- function(jsdm, taxon, d.squared = TRUE, legend=TRUE){
   # Get predicted probabilities with default quantiles c(0.05, 0.95)
-  dt <- propogate.jsdm.pred(jsdm, get.quantiles = TRUE) 
+  dt <- prop.jsdm.pred(jsdm, get.quantiles = TRUE) 
   dt <- left_join(dt, inputs$xy, by="SiteId")
 
   # Format data for ggplot() aesthetics
@@ -2974,26 +2876,32 @@ map.jsdm.pred.taxon <- function(jsdm, taxon, legend=TRUE){
   # Map geometries
   g <- ggplot()
   g <- g + geom_sf(data = inputs$ch, fill=NA, color="black")
+  g <- g + coord_sf(crs = st_crs(inputs$ch), datum = NA)
   g <- g + geom_point(data = plot.data, aes(X, Y, size = Pred, alpha = Alpha, color = Obs, stroke = Stroke, shape = Shape))
   
   # Configure theme and labels
   g <- g + theme_void(base_size = 15)
   g <- g + theme(plot.title = element_text(hjust = 0.5),
-                 panel.grid.major = element_line(colour="transparent"))
+                 panel.grid.major = element_blank())
   
-  # g <- g + scale_y_continuous(breaks=NULL)
-  # g <- g + scale_x_continuous(breaks=NULL)
-  # g <- g + guides(colour = guide_legend(override.aes = list(size=6)))
-  # g <- g + theme_minimal()
-  # g <- g + labs(main = paste("Trial:", trial,"| Variable:", variable),
-  #               x = "",
-  #               y = "")
-  g <- g + labs(title = taxon.label,
+  if(d.squared){
+    # Store named vector of D^2 values for all taxa
+    d.squared <- jsdm$deviance$D2
+    names(d.squared) <- jsdm$deviance$Taxon
+    
+    # Construct a partially substituted expression with the taxon name and D^2 value
+    label <- bquote(.(taxon.label)~"(D"^2 == .(signif(d.squared[taxon], 2))*")")
+  } else{
+    label <- taxon.label
+  }
+  g <- g + labs(title = label,
                 x = "",
                 y = "",
                 size = "Probability of\noccurrence",
                 alpha = "Posterior",
                 color = "Observation")
+  
+  # plot(c(0,0), main = bquote(.(taxon.label)~"(D"^2 == .(signif(d.squared[taxon], 2))*")"))
   
   # Configure legends and scales
   g <- g + guides(size = guide_legend(override.aes = list(color="black", stroke=0), order=1),
@@ -3009,6 +2917,8 @@ map.jsdm.pred.taxon <- function(jsdm, taxon, legend=TRUE){
   }
   return(g)
 }
+
+
 # # Plot map of influence factors (0-100)
 # # Requires: predictors, inputs$ch, inputs$xy, inv
 map.inputs <- function(data, fileName) {
@@ -3056,184 +2966,69 @@ map.inputs <- function(data, fileName) {
 }
 
 # Other plots ####
-plot.trace <- function(directory = 'outputs/paper 1 extensions', folder){
-  cat("Load image: ", folder, " -> | ")
-  
-  full.path <- paste(getwd(), directory, folder, sep="/")
+
+plot.trace <- function(directory = "outputs/paper 1 extensions", folder){
+  full.path   <- paste(directory, folder, sep="/")
   extensions <- identify.jsdm(full.path)
-  model.image <- new.env()
-  load(paste(full.path, extensions$workspace, sep = "/"), envir = model.image)
+  file.name.core <- extensions$workspace
   
-  files <- list.files(full.path)
-  workspace <- files[endsWith(files, ".RData")] # failure point: assumes one .RData file
-  filename <- gsub(".RData", "", workspace)
+  traceplot.nrow <- 10
+  traceplot.ncol <-  5
   
-  cat("Extract -> | ")
-  # Stanfit object
-  res <- model.image$res
+  if ( !require("corrplot") ) { install.packages("corrplot"); library("corrplot") }
+  if ( !require("ellipse") )  { install.packages("ellipse");  library("ellipse") }
+  if ( !require("psych") )    { install.packages("psych");    library("psych") }
+  if ( !require("coda") )     { install.packages("coda");     library("coda") }
+  if ( !require("rstan") )    { install.packages("rstan");    library("rstan") }
+  rstan_options(auto_write = TRUE)
+  options(mc.cores = parallel::detectCores())
   
-  # Peter's code START:
-  # correct chains for multiple local maxima of latent variables:
+  if ( !file.exists(paste(directory, folder,file.name.core,sep="/")) ){
+    print(paste("File: ",paste(directory, folder, file.name.core,sep="/"),"not found"))
+  } 
+  load(file=paste(full.path,"/",file.name.core,sep=""))
+  
   res.orig <- res
   res.extracted.trace1 <- extract(res,permuted=FALSE,inc_warmup=FALSE)
-  
-  n.latent <- extensions$n.latent
-  n.chain <- model.image$n.chain
-  if ( extensions$n.latent > 0 ){
-    name.x        <- "x_lat"
-    name.beta     <- "beta_lat"
-    parnames      <- names(res@sim$samples[[1]])
-    ind.x         <- which(substring(parnames,1,nchar(name.x))==name.x)
-    ind.beta      <- which(substring(parnames,1,nchar(name.beta))==name.beta)
-    ind.notwarmup <- round(res@sim$warmup/res@sim$thin+1):round(res@sim$iter/res@sim$thin)
-    print("")
-    print(paste("n.latent",n.latent))
-    if ( n.latent == 1 )
-    {
-      n.x    <- length(ind.x)
-      
-      # calculate means of chain 1 at all sites
-      x.mean.1 <- rep(NA,length=n.x)
-      for ( i in 1:n.x ) x.mean.1[i] <- mean(res@sim$samples[[1]][[ind.x[i]]][ind.notwarmup])
-      if ( n.chain > 1 )  # adapt other chains to first:
-      {
-        for ( ch in 2:n.chain )  # match chains to first chain
-        {
-          print(paste("chain",ch))
-          # calculate means of chain ch at all sites
-          x.mean.ch <- rep(NA,length=n.x)
-          for ( i in 1:n.x ) x.mean.ch[i] <- mean(res@sim$samples[[ch]][[ind.x[i]]][ind.notwarmup])
-          dx.min.plus  <- sum(abs(x.mean.1-x.mean.ch))
-          dx.min.minus <- sum(abs(x.mean.1+x.mean.ch))
-          if ( dx.min.minus < dx.min.plus )
-          {
-            # change sign:
-            x.mean.ch <- -x.mean.ch
-            res@sim$samples[[ch]][[ind.x]]    <- -res@sim$samples[[ch]][[ind.x]]
-            res@sim$samples[[ch]][[ind.beta]] <- -res@sim$samples[[ch]][[ind.beta]]
-            print("sign changed")
-          }
-        }
-      }
-    }
-    else  # n.latent > 1
-    {
-      n.x.i    <- round(length(ind.x)/n.latent)
-      ind.x    <- matrix(ind.x,ncol=n.latent,byrow=FALSE)    # reformat ind.x
-      ind.beta <- matrix(ind.beta,ncol=n.latent,byrow=TRUE)  # reformat ind.beta
-      
-      # calculate means of chain 1 at all sites and for all latent variables
-      x.mean.1 <- matrix(NA,nrow=n.x.i,ncol=n.latent)
-      for ( i in 1:n.x.i )
-      {
-        for ( k in 1:n.latent ) x.mean.1[i,k] <- mean(res@sim$samples[[1]][[ind.x[i,k]]][ind.notwarmup])
-      }
-      
-      if ( n.chain > 1 )
-      {
-        for ( ch in 2:n.chain )  # match chains to first chain
-        {
-          print(paste("chain",ch))
-          # calculate means of chain ch at all sites and for all latent variables
-          x.mean.ch <- matrix(NA,nrow=n.x.i,ncol=n.latent)
-          for ( i in 1:n.x.i )
-          {
-            for ( k in 1:n.latent ) x.mean.ch[i,k] <- mean(res@sim$samples[[ch]][[ind.x[i,k]]][ind.notwarmup])
-          }
-          for ( k in 1:n.latent )  # match latent variables and signs
-          {
-            k.min <- k
-            plus.min <- TRUE 
-            dx.min.plus  <- sum(abs(x.mean.1[,k]-x.mean.ch[,k]))
-            dx.min.minus <- sum(abs(x.mean.1[,k]+x.mean.ch[,k]))
-            dx.min <- dx.min.plus
-            if ( dx.min.minus < dx.min.plus ) { plus.min <- FALSE; dx.min <- dx.min.minus }
-            if ( n.latent > k )
-            {
-              for ( kk in (k+1):n.latent )
-              {
-                dx.min.plus  <- sum(abs(x.mean.1[,kk]-x.mean.ch[,kk]))
-                dx.min.minus <- sum(abs(x.mean.1[,kk]+x.mean.ch[,kk]))
-                if ( dx.min.plus  < dx.min ) { dx.min <- dx.min.plus;  plus.min <- TRUE; k.min <- kk }
-                if ( dx.min.minus < dx.min ) { dx.min <- dx.min.minus; plus.min <- FALSE; k.min <- kk }
-              }
-            }
-            print(paste("k",k))
-            print(paste("k.min",k.min))
-            # exchange variables:
-            tmp <- x.mean.ch[,k.min]
-            x.mean.ch[,k.min] <- x.mean.ch[,k]
-            if ( plus.min ) x.mean.ch[,k] <-  tmp
-            else            x.mean.ch[,k] <- -tmp
-            for ( i in 1:nrow(ind.x) )
-            {
-              tmp <- res@sim$samples[[ch]][[ind.x[i,k.min]]]
-              res@sim$samples[[ch]][[ind.x[i,k.min]]] <- res@sim$samples[[ch]][[ind.x[i,k]]]
-              if ( plus.min ) res@sim$samples[[ch]][[ind.x[i,k]]] <-  tmp
-              else            res@sim$samples[[ch]][[ind.x[i,k]]] <- -tmp
-            }
-            print("exchange x completed")
-            for ( j in 1:nrow(ind.beta) )
-            {
-              tmp <- res@sim$samples[[ch]][[ind.beta[j,k.min]]]
-              res@sim$samples[[ch]][[ind.beta[j,k.min]]] <- res@sim$samples[[ch]][[ind.beta[j,k]]]
-              if ( plus.min ) res@sim$samples[[ch]][[ind.beta[j,k]]] <-  tmp
-              else            res@sim$samples[[ch]][[ind.beta[j,k]]] <- -tmp
-            }
-            print("exchange beta completed")
-          }
-        }
-      }
-    }
-  }
-  
-  # Extract the modified stanfit object
   res.extracted.trace2 <- extract(res,permuted=FALSE,inc_warmup=FALSE)
   res.extracted       <- extract(res,permuted=TRUE,inc_warmup=FALSE)
-  # Peter's code END
   
-  # traceplot
+  mod.char <- matrix(c("Model",submodel),nrow=1)
+  mod.char <- rbind(mod.char,c("Number of taxa",ncol(occur.taxa)))
+  mod.char <- rbind(mod.char,c("Number of sites",n.sites))
+  mod.char <- rbind(mod.char,c("Number of samples",n.samples))
+  mod.char <- rbind(mod.char,c("Number of ext. influence factors",ncol(data$x)))
+  mod.char <- rbind(mod.char,c("Influence factors",paste(names(data$x),collapse=",")))
+  n.par <- 0
+  pars  <- ""
+  for ( i in 1:(length(res.extracted)-1)){
+    d <- dim(res.extracted[[i]])
+    n <- 1; if ( length(d)>1 ) n <- prod(d[-1]); n.par <- n.par+n
+    if ( nchar(pars)>0 ) pars <- paste(pars,",",sep="")
+    pars <- paste(pars,names(res.extracted)[i],"(",n,")",sep="")
+  }
+  mod.char <- rbind(mod.char,c("Number of parameters",n.par))
+  mod.char <- rbind(mod.char,c("Parameters",pars))
   
   dims <- dim(res.extracted.trace1)
-  pdf(paste(directory,"/traceplot_",filename,"_traces.pdf",sep=""),width=8,height=12)
+  
+  pdf(paste(full.path,"/",folder,"_traces.pdf",sep=""),width=8,height=12)
   par(mfrow=c(traceplot.nrow,traceplot.ncol),mar=c(2,2,2,0.5)+0.2) # c(bottom, left, top, right)
-  for ( i in 1:ceiling(length(names(res))/(traceplot.nrow*traceplot.ncol)) )
-  {
+  for ( i in 1:ceiling(length(names(res))/(traceplot.nrow*traceplot.ncol)) ){
     start <- (i-1)*traceplot.nrow*traceplot.ncol+1
     end   <- min(start+traceplot.nrow*traceplot.ncol-1,length(names(res)))
-    for ( j in start:end )
-    {
+    for ( j in start:end ){
       plot(numeric(0),numeric(0),type="n",cex.axis=0.8,
            xlim=c(0,dims[1]),ylim=range(res.extracted.trace1[,,j]),xlab="",ylab="",
            main=dimnames(res.extracted.trace1)[[3]][j])
+      # for ( k in 1:dims[2] ) lines(1:dims[1],res.extracted.trace1[,k,j][1:1000],col=k)
       for ( k in 1:dims[2] ) lines(1:dims[1],res.extracted.trace1[,k,j],col=k)
     }
   }
   dev.off()
-  
-  # traceplot 2
-  
-  if ( n.latent > 0 )
-  {
-    dims <- dim(res.extracted.trace2)
-    pdf(paste(directory,"/traceplot_",filename,"_traces2.pdf",sep=""),width=8,height=12)
-    par(mfrow=c(traceplot.nrow,traceplot.ncol),mar=c(2,2,2,0.5)+0.2) # c(bottom, left, top, right)
-    for ( i in 1:ceiling(length(names(res))/(traceplot.nrow*traceplot.ncol)) )
-    {
-      start <- (i-1)*traceplot.nrow*traceplot.ncol+1
-      end   <- min(start+traceplot.nrow*traceplot.ncol-1,length(names(res)))
-      for ( j in start:end )
-      {
-        plot(numeric(0),numeric(0),type="n",cex.axis=0.8,
-             xlim=c(0,dims[1]),ylim=range(res.extracted.trace2[,,j]),xlab="",ylab="",
-             main=dimnames(res.extracted.trace2)[[3]][j])
-        for ( k in 1:dims[2] ) lines(1:dims[1],res.extracted.trace2[,k,j],col=k)
-      }
-    }
-    dev.off()
-  }
-  
+  return(mod.char)
 }
+
 plot.commcorr <- function(jsdm){
   require(ellipse)
   if(jsdm$extensions$correlations){
@@ -3368,7 +3163,8 @@ plot.comm <- function(jsdm, filename){
                 "FRI" = expression(paste(beta["FRI"], " (1/%)")),
                 "F10m" = expression(paste(beta["F10m"], " (1/%)")),
                 "F100m" = expression(paste(beta["F100m"], " (1/%)")),
-                "IAR" = expression(paste(beta["IAR"], " 1/(w"["c"]%*%"f"["c"],")")),
+                # "IAR" = expression(paste(beta["IAR"], " 1/(w"["c"]%*%"f"["c"],")")),
+                "IAR" = expression(paste(beta["IAR"])),
                 "Urban" = expression(paste(beta["Urban"], " (1/%)")),
                 "LUD" = expression(paste(beta["LUD"], " (km"^2,"/CE)"))
     )
@@ -3413,15 +3209,15 @@ plot.comm <- function(jsdm, filename){
 }
 
 # Plot probabilities versus influence factors for each taxon, given extract.jsdm() or run.isdm() output object
-plot.prob <- function(result, filename){
+plot.prob <- function(jsdm, filename){
   # Detect whether jSDM argument is a collection of iSDMs or a jSDM,
   # create objects for preparation of inputs 
-  if ("models" %in% names(result)){
-    K <- result$inf.fact
-    y <- tibble(SiteId = result$mdata$SiteId, SampId = result$mdata$SampId)
+  if ("models" %in% names(jsdm)){
+    K <- jsdm$inf.fact
+    y <- tibble(SiteId = jsdm$mdata$SiteId, SampId = jsdm$mdata$SampId)
   }else{
-    K <- result$inf.fact
-    y <- tibble(SiteId = result$sites, SampId = result$samples)
+    K <- jsdm$inf.fact
+    y <- tibble(SiteId = jsdm$sites, SampId = jsdm$samples)
   }
   
   inputs <- prepare.inputs(K, y, center = FALSE)
@@ -3433,14 +3229,14 @@ plot.prob <- function(result, filename){
   levels(inputs$Label) <- labeller(levels(inputs$Label))
   
   # Join input data to probabilities
-  prob <- left_join(result$probability, inputs, by=c("SiteId", "SampId"))
+  prob <- left_join(jsdm$probability, inputs, by=c("SiteId", "SampId"))
   prob$Obs <- as.factor(prob$Obs)
   setDT(prob); setkey(prob, Taxon)
   
   # Prepare taxa/D2 statistics
-  result$deviance <- arrange(result$deviance, -n.present)
-  taxa <- result$deviance$Taxon
-  d <- result$deviance$D2; names(d) <- taxa
+  jsdm$deviance <- arrange(jsdm$deviance, -n.present)
+  taxa <- jsdm$deviance$Taxon
+  d <- jsdm$deviance$D2; names(d) <- taxa
   
   pdf(paste(filename, '.pdf', sep=''), paper = 'special', height = 9, width = 12, onefile = TRUE)
   for (j in 1:length(taxa)){
@@ -3452,14 +3248,15 @@ plot.prob <- function(result, filename){
     g <- g + geom_point(alpha = 0.25)
     g <- g + theme_bw(base_size=15)
     g <- g + facet_wrap(~ Label, scales = "free_x", labeller=label_parsed, strip.position="bottom")
-    g <- g + labs(title = paste("Probability of occurrence (based on the maximum marginal posterior distribution of the taxon-specific parameter) vs explanatory variables for",paste(taxon)),
+    g <- g + labs(title = paste("Probability of occurrence vs explanatory variables for",paste(taxon)),
                   x = "Explanatory variable",
                   y = "Probability of occurrence",
                   color = "Observation")
     g <- g + theme(strip.background = element_blank(), 
                    strip.placement = "outside",
                    plot.title = element_text(size=10))
-    g <- g + scale_color_manual(name = "Observation", values=c("#FF0000", "#0077FF"), labels=c("Absence", "Presence"))
+    g <- g + scale_color_manual(name = "Observation", values=c("0" = "#FF0000", "1" = "#0077FF"), labels = c("Absence", "Presence"))
+    g <- g + ylim(0,1)
     g <- g + guides(colour = guide_legend(override.aes = list(size=6)))
     cat("Plotting taxon: ", taxon, "\n")
     print(g)
@@ -3467,8 +3264,10 @@ plot.prob <- function(result, filename){
   dev.off()
 }
 
-# Plot probabilities versus influence factors for specific taxon, given extract.jsdm() or run.isdm() output object
-plot.prob.taxon <- function(jsdm, taxon, legend=FALSE){
+# Plot probabilities versus explanatory variables for a specific taxon, given extract.jsdm() or run.isdm() output object
+# - Internally reproduces the input data with prepare.inputs(); maybe JSDM should already have it from extract.jsdm()?
+# - Plots all explanatory variables unless vector argument variables gives specific variables
+plot.prob.taxon <- function(jsdm, taxon, variables = jsdm$inf.fact, marginal.density = FALSE, legend=FALSE){
   # Detect whether "jsdm" argument is a collection of iSDMs or a jSDM,
   # create objects for preparation of inputs 
   if ("models" %in% names(jsdm)){
@@ -3480,38 +3279,61 @@ plot.prob.taxon <- function(jsdm, taxon, legend=FALSE){
   }
   
   # Prepare inputs and reshape into tidy data
-  inputs <- prepare.inputs(K, y, center = FALSE)
-  inputs <- gather(inputs, Variable, Value, -SiteId, -SampId)
-  inputs <- filter(inputs, Variable != "Temp2")
+  x <- prepare.inputs(K, y, center = FALSE)
+  x <- gather(x, Variable, Value, -SiteId, -SampId)
+  x <- filter(x, Variable != "Temp2" & Variable %in% variables)
   
   # labeller() returns expressions for nice plot labels for each influence factor
-  inputs$Label <- factor(inputs$Variable, levels = K[K !="Temp2"])
-  levels(inputs$Label) <- labeller(levels(inputs$Label))
+  x$Label <- factor(x$Variable, levels = K[K !="Temp2"])
+  levels(x$Label) <- labeller(levels(x$Label))
   
   # Join inputs to probabilities
-  prob <- left_join(jsdm$probability, inputs, by=c("SiteId", "SampId"))
-  prob$Obs <- as.factor(prob$Obs)
-  setDT(prob)
+  plot.data <- jsdm$probability %>%
+    filter(Taxon==taxon) %>%
+    left_join(x, by=c("SiteId", "SampId")) %>%
+    mutate(Obs = as.factor(Obs))
   
-  taxon.prob <- filter(prob, Taxon==taxon)
   taxon.label <- sub("_", " ", taxon)
   
-  g <- ggplot(data = taxon.prob, aes(x = Value, y = Pred, color = Obs))
+  g <- ggplot(data = plot.data, aes(x = Value, y = Pred, color = Obs))
   g <- g + geom_point(alpha = 0.25)
   g <- g + theme_bw(base_size=15)
-  g <- g + facet_wrap(~ Label, scales = "free_x", labeller=label_parsed, strip.position="bottom")
+  
   g <- g + labs(title = taxon.label,
-    y = "Probability of occurrence",
-    color = "Observation")
-  g <- g + theme(strip.background = element_blank(), 
-                 strip.placement = "outside",
-                 axis.title.x = element_blank(),
-                 plot.title = element_text(hjust = 0.5))
-  g <- g + scale_color_manual(name = "Observation", values=c("#FF0000", "#0077FF"), labels=c("Absence", "Presence"))
+                y = "Probability of occurrence",
+                color = "Observation")
+  g <- g + scale_color_manual(name = "Observation", values=c("0" = "#FF0000", "1" = "#0077FF"), labels = c("Absence", "Presence"))
+  
   g <- g + guides(colour = guide_legend(override.aes = list(size=6)))
+  g <- g + ylim(0,1)
+  
   if (!legend){
     g <- g + guides(colour=FALSE, size=FALSE)
   }
+  
+  # If there are multiple variables, construct a ggplot with facets, and corresponding theme elements and labels
+  if(length(variables) > 1){
+    g <- g + facet_wrap(~ Label, scales = "free_x", labeller=label_parsed, strip.position="bottom")
+    g <- g + theme(strip.background = element_blank(), 
+                   strip.placement = "outside",
+                   axis.title.x = element_blank(),
+                   plot.title = element_text(hjust = 0.5))
+  } else{
+    g <- g + theme(plot.title = element_text(hjust = 0.5),
+                   axis.text.x = element_text(size=14),
+                   axis.text.y = element_text(size=14))
+    g <- g + labs(x = labeller(inf.fact = variables))
+    # g <- g + scale_x_log10() # log-transformation for skewed variables
+    
+    # Optionally add marginal distributions to the plot
+    # Note: marginal distributions don't work with multiple variables:
+    # https://github.com/daattali/ggExtra/issues/28
+    if(marginal.density){
+      require(ggExtra)
+      g <- ggMarginal(g, type="density", margins = "x", groupFill = TRUE)
+    }
+  }
+
   return(g)
 }
 
@@ -3564,3 +3386,4 @@ plot.prob.taxon <- function(jsdm, taxon, legend=FALSE){
 #   #   scale_colour_manual(values = c("grey", "black")) +
 #   #   geom_density()
 # }
+

@@ -11,7 +11,7 @@ source('scripts/functions.R')
 # Load packages and install if necessary with ipak()
 # Tidyverse packages and data.table for data processing, mgcv (GAMs), rgdal (spatial data), doParallel (parallel computing), rstan and coda for Bayesian inference, crayon for colored console outputs (helpful but unnecessary), scales/e1071/MASS/quantreg for miscallaneous functions
 # Plotting libraries: data.tree, networkD3, ggridges, ggpubr
-ipak(c("tidyverse", "data.table", "car", "psych", "doParallel", "coda", "rstan", "scales", "e1071", "MASS", "crayon", "rgdal", "sf", "plotly", "ggridges", "ggpubr", "cowplot", "svglite")) # "mgcv", "quantreg"
+ipak(c("tidyverse", "data.table", "car", "psych", "doParallel", "coda", "rstan", "scales", "e1071", "MASS", "crayon", "rgdal", "sf", "plotly", "ggridges", "ggpubr","ggExtra", "cowplot", "svglite")) # "mgcv", "quantreg"
 
 options(stringsAsFactors = FALSE)
 options(scipen=999)
@@ -113,4 +113,4 @@ b$urban <- fread("inputs/catchment_buffer/Urban_All_Buffer_Catch.csv", sep=';', 
 b$arable <- fread("inputs/catchment_buffer/Arable_All_Buffer_Catch.csv", sep=';', header=TRUE, na.strings=c("<Null>", "NA", ""), stringsAsFactors=FALSE)
 
 # Optional: run inputs.R script to prepare the inputs
-# source('scripts/inputs.R')
+source('scripts/inputs.R')

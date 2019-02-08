@@ -39,7 +39,6 @@
 #                            )
 # 
 # write.csv(predictors.trans, 'outputs/predictors_transformed.csv', row.names=FALSE)
-# Variable selection ####
 vs.bdms <- extract.vsr("variable_selection/bdms_untransformed", sample.bdms)
 
 # Get mean relative deviance for each model over entire community (excluding rare taxa)
@@ -48,7 +47,14 @@ vs.bdms.mean <- vs.bdms %>%
   group_by(Model) %>%
   summarise(mrd.train = mean(rdev.train, na.rm=TRUE), mrd.test = mean(rdev.test, na.rm=TRUE)) %>%
   arrange(mrd.test) %>%
-  mutate(Parameters = vapply(strsplit(Model, " "), length, integer(1)))
+  mutate(Parameters = vapply(strsplit(Model, " "), length, integer(1)) + 1)
+
+# count the number of explanatory variables (as opposed to number of parameters)
+vs.bdms.mean$ExpVar <- sapply(vs.bdms.mean$Model, function(i){
+  i <- strsplit(i," ")[[1]]
+  i <- i[!i %in% c("FV2", "Temp2")]
+  uniqueN(i)
+})
 
 plot.data <- vs.bdms.mean %>%
   arrange(Parameters) %>%
@@ -161,11 +167,17 @@ deploy.jsdm(K, sample.bdms, "TT4_train2", center=T, cv=2)
 deploy.jsdm(K, sample.bdms, "TT4_train3", center=T, cv=3)
 
 
+plot.trace(directory = "outputs/paper 1 extensions", folder = 'FF0')
+plot.trace(directory = "outputs/paper 1 extensions", folder = 'TF0')
+plot.trace(directory = "outputs/paper 1 extensions", folder = 'TT0')
+plot.trace(directory = "outputs/paper 1 extensions", folder = 'TT1')
+plot.trace(directory = "outputs/paper 1 extensions", folder = 'TT2')
+
 fit.FF0 <- extract.jsdm('outputs/paper 1 extensions', 'FF0') # simplest joint model
 fit.TF0 <- extract.jsdm('outputs/paper 1 extensions', 'TF0') # correlated beta.comm
 fit.TT0 <- extract.jsdm('outputs/paper 1 extensions', 'TT0') # correlated beta.comm, site effects
 fit.TT1 <- extract.jsdm('outputs/paper 1 extensions', 'TT1')
-fit.TT2 <- extract.jsdm('outputs/paper 1 extensions', 'TT2')
+fit.TT2 <- extract.jsdm('outputs/paper 1 extensions/TT2 modified chains', 'TT2')
 # fit.TT3 <- extract.jsdm('outputs/paper 1 extensions', 'TT3')
 # fit.TT4 <- extract.jsdm('outputs/paper 1 extensions', 'TT4')
 
@@ -222,36 +234,49 @@ m <- 1:(n-1)
 null.dev.line <- tibble(null.deviance = -2*(m/n*log(m/n)+(n-m)/n*log(1-m/n)), n.samples = m)
 null.dev.line$prevalence <- (m/n)*100
 null.dev.line$Model <- "Null model"
-
+null.dev.line$ModelLabel <- factor(null.dev.line$Model, levels=c("Null model", "iSDM", "UF0", "UT0", "CF0", "CT0", "CT1", "CT2"))
 plot.data <- plot.data %>%
-  filter(Model %in% c("iSDM", "UF0"))
+  filter(Model %in% c("iSDM", "UF0")) %>%
+  bind_rows(null.deviance)
 
 g1 <- ggplot()
-g1 <- g1 + geom_point(data = plot.data, aes(x=prevalence, y=std.deviance, color=Model), size=3, alpha=0.4)
-g1 <- g1 + geom_point(data = null.deviance, aes(x=prevalence, y=std.deviance, color=Model), size = 3, alpha=0.4)
-g1 <- g1 + geom_line(data = null.dev.line, aes(x=prevalence, y=null.deviance, color=Model), linetype = "dashed", alpha=0.4, show.legend = FALSE)
+g1 <- g1 + geom_point(data = plot.data, aes(x=prevalence, y=std.deviance, color=ModelLabel), size=3, alpha=0.4)
+g1 <- g1 + geom_point(data = plot.data, aes(x=prevalence, y=std.deviance, color=ModelLabel), size = 3, alpha=0.4)
+g1 <- g1 + geom_line(data = null.dev.line, aes(x=prevalence, y=null.deviance, color=ModelLabel), linetype = "dashed", alpha=0.4, show.legend = FALSE)
+#
 g1 <- g1 + geom_segment(data = dev.segments, aes(x=x1, y=y1, xend=x2, yend=y2), alpha = 0.3)
 
-g1 <- g1 + scale_colour_manual(values=c("UF0" = "#048504", "iSDM" = "#790FBF", "Null model" = "#000000"))
+g1 <- g1 + scale_colour_manual(values=c("Null model" = "#000000", "iSDM" = "#790FBF", "UF0" = "#048504"))
 g1 <- g1 + theme_bw(base_size = 20)
 g1 <- g1 + theme(axis.text=element_text(size=14),
                  plot.title = element_blank())
 g1 <- g1 + labs(y = "Standardized deviance",
-                x = "Prevalence (%)")
+                x = "Prevalence (%)",
+                color = "Model")
 g1 <- g1 + guides(colour = guide_legend(override.aes = list(size=6)), shape = FALSE, color = FALSE)
 
 rm(data1, data2, dev.segments, n, m)
 
 # Plot P1 - D2 vs std dev ###
 # Point segments
-data1 <- spread(select(plot.data, Taxon, Model, D2), Model, D2) # y coordinates
+data1 <- plot.data %>% # prepare y-coordinates
+  filter(Model != "Null model") %>%
+  select(Taxon, Model, D2) %>%
+  spread(Model, D2)
+# data1 <- spread(select(plot.data, Taxon, Model, D2), Model, D2) # y coordinates
 colnames(data1) <- c("Taxon", "y1", "y2")
-data2 <- spread(select(plot.data, Taxon, Model, std.deviance), Model, std.deviance) # x coordinates
+
+data2 <- plot.data %>% # prepare y-coordinates
+  filter(Model != "Null model") %>%
+  select(Taxon, Model, std.deviance) %>%
+  spread(Model, std.deviance)
+# data2 <- spread(select(plot.data, Taxon, Model, std.deviance), Model, std.deviance) # x coordinates
 colnames(data2) <- c("Taxon", "x1", "x2")
 dev.segments <- left_join(data1, data2, by = "Taxon")
 
+plot.data.g2 <- filter(plot.data, Model != "Null model")
 g2 <- ggplot()
-g2 <- g2 + geom_point(data = plot.data, aes(x = std.deviance, y = D2, color = Model, size = n.present), alpha = 0.4)
+g2 <- g2 + geom_point(data = plot.data.g2, aes(x = std.deviance, y = D2, color = Model, size = n.present), alpha = 0.4)
 g2 <- g2 + geom_segment(data = dev.segments, aes(x = x1, y = y1, xend = x2, yend= y2), alpha = 0.2)
 g2 <- g2 + scale_colour_manual(values=c("UF0" = "#048504", "iSDM" = "#790FBF"))
 g2 <- g2 + theme_bw(base_size = 20)
@@ -259,9 +284,9 @@ g2 <- g2 + theme(axis.text=element_text(size=14),
                  plot.title = element_blank())
 g2 <- g2 + labs(x = "Standardized deviance",
                 y = expression("D"["j"]^2),
-                colour = "Model", 
+                color = "Model", 
                 size = "Number of\noccurrences")
-g2 <- g2 + guides(colour = guide_legend(override.aes = list(size=6)))
+g2 <- g2 + guides(color = guide_legend(override.aes = list(size=6)))
 
 rm(data1, data2, dev.segments)
 
@@ -337,6 +362,7 @@ g <- g + scale_fill_brewer(palette = "Set1")
 pdf('outputs/paper 1 extensions/P1 - Quality of fit of FF0 vs FT0.pdf', width = 15, paper='a4r')
 g
 dev.off()
+
 # Probabilities ####
 # Plot probabilities of occurrence based on model trial and observed presence-absence: not a very effective plot
 # isdm$probability$Trial <- "iSDM"
@@ -365,7 +391,7 @@ cv.FF0 <- cv.jsdm(folder = "FF0")
 cv.TF0 <- cv.jsdm(folder = 'TF0')
 cv.TT0 <- cv.jsdm(folder = 'TT0')
 cv.TT1 <- cv.jsdm(folder = 'TT1')
-cv.TT2 <- cv.jsdm(folder = 'TT2')
+cv.TT2 <- cv.jsdm(directory = "outputs/paper 1 extensions/TT2 modified chains", folder = 'TT2')
 
 
 # Combine all deviance statistics from all models
@@ -383,9 +409,10 @@ cv.deviance$Trial <- ifelse(cv.deviance$Trial=="TT0", "CT0", cv.deviance$Trial)
 cv.deviance$Trial <- ifelse(cv.deviance$Trial=="TT1", "CT1", cv.deviance$Trial)
 cv.deviance$Trial <- ifelse(cv.deviance$Trial=="TT2", "CT2", cv.deviance$Trial)
 
+# cv.deviance$Type <- ifelse(cv.deviance$Type=="Training", "Calibration", cv.deviance$Type)
+# cv.deviance$Type <- ifelse(cv.deviance$Type=="Testing", "Prediction", cv.deviance$Type)
+
 # P1 CV iSDM vs UF0 ####
-
-
 plot.data <- cv.deviance %>%
   filter(Trial %in% c("iSDM", "UF0")) %>%
   select(Taxon, Type, Trial, std.deviance) %>%
@@ -436,10 +463,11 @@ plot.data <- cv.deviance %>%
 g2 <- ggplot(plot.data)
 g2 <- g2 + geom_boxplot(aes(x=Trial, y = MSD, fill=Type), show.legend=FALSE)
 g2 <- g2 + theme_bw(base_size = 20)
-g2 <- g2 + theme(axis.title.x = element_blank())
-g2 <- g2 + ylim(c(0,1.5))
 g2 <- g2 + labs(y="Mean standardized deviance\n(based on maximum posterior)",
-                caption=expression(gamma==0~"and"~"u"==0~"during prediction for CT0, CT1, and CT2"))
+                subtitle=expression(gamma==0~"and"~"u"==0~"during prediction for CT0, CT1, and CT2"))
+g2 <- g2 + theme(axis.title.x = element_blank(),
+                 plot.subtitle=element_text(size=14))
+g2 <- g2 + ylim(c(0,1.5))
 g2 <- g2 + scale_fill_brewer(palette = "Set1")
 g2 
 
@@ -450,7 +478,7 @@ cv.FF0.sample <- cv.jsdm.sample(folder = "FF0")
 cv.TF0.sample <- cv.jsdm.sample(folder = "TF0")
 cv.TT0.sample <- cv.jsdm.sample(folder = "TT0")
 cv.TT1.sample <- cv.jsdm.sample(folder = "TT1")
-cv.TT2.sample <- cv.jsdm.sample(folder = "TT2")
+cv.TT2.sample <- cv.jsdm.sample(directory = "outputs/paper 1 extensions/TT2 modified chains", folder = "TT2")
 
 cv.deviance.sample <- bind_rows(cv.FF0.sample$deviance, cv.TF0.sample$deviance, cv.TT0.sample$deviance, cv.TT1.sample$deviance, cv.TT2.sample$deviance)
 
@@ -461,8 +489,6 @@ cv.deviance.sample$Trial <- ifelse(cv.deviance.sample$Trial=="TT0", "CT0", cv.de
 
 cv.deviance.sample$Trial <- ifelse(cv.deviance.sample$Trial=="TT1", "CT1", cv.deviance.sample$Trial)
 cv.deviance.sample$Trial <- ifelse(cv.deviance.sample$Trial=="TT2", "CT2", cv.deviance.sample$Trial)
-
-cv.deviance.sample$Type[cv.deviance.sample$Type=="testing"] <- "Testing"
 
 # Get the mean standardized deviance
 plot.data <- cv.deviance.sample %>%
@@ -479,7 +505,7 @@ g3 <- g3 + geom_boxplot(aes(x=Trial, y = MSD, fill=Type))
 g3 <- g3 + scale_fill_brewer(palette = "Set1")
 g3 <- g3 + theme_bw(base_size = 20)
 g3 <- g3 + theme(axis.title.x = element_blank())
-g3 <- g3 + labs(y = "Mean standardized deviance\n(based on sampled posterior)")
+g3 <- g3 + labs(y = "Mean standardized deviance\n(based on posterior sample)")
 
 g3 <- g3 + ylim(c(0,1.5))
 g3
@@ -556,8 +582,8 @@ g2 <- g2 + geom_point(data = mean.richness, aes(x = richness.obs, y = mean.richn
 g2 <- g2 + geom_abline(intercept = 0, slope = 1, color="black", size=1.25)
 g2 <- g2 + facet_grid(Rank ~ Trial)
 g2 <- g2 + theme_bw(base_size = 20)
-g2 <- g2 + labs(x = "Observed sample richness",
-                y = "Predicted posterior sample richness")
+g2 <- g2 + labs(x = "Observed richness",
+                y = "Predicted richness")
 g2 <- g2 + coord_cartesian(ylim=c(0,75))
 
 # pdf('outputs/paper 1 extensions/P1 - richness.pdf', height=10.5, width=13)
@@ -568,91 +594,22 @@ g2 <- g2 + coord_cartesian(ylim=c(0,75))
 # # From results_p1.R script:
 # K <- c("Temp", "Temp2", "FV", "F100m", "LUD", "IAR")
 # predictors <- prepare.inputs(K, sample.bdms, center = TRUE)
-# Assumes training and testing data are already in workspace (e.g., train1/test1)
-# Assumes observed richness is already in workspace (richness.obs)
-cv.rm <- function(predictors){
-  output <- tibble()
-  f <- as.formula(paste("richness.obs~", paste(K, collapse="+")))
-  for (fold in 1:3){
-    cat("fold:", fold, "\n")
-    train.data <- as.tibble(get(paste("train",fold,sep="")))
-    test.data <- as.tibble(get(paste("test",fold,sep="")))
-    
-    # Observation data only for training/testing of family/species
-    train.richness.obs.family <- train.data %>%
-      select(SampId) %>%
-      left_join(filter(richness.obs, Rank=="Family"), by="SampId")
-    
-    train.richness.obs.species <- train.data %>%
-      select(SampId) %>%
-      left_join(filter(richness.obs, Rank=="Species"), by="SampId")
-    
-    test.richness.obs.family <- test.data %>%
-      select(SampId) %>%
-      left_join(filter(richness.obs, Rank=="Family"), by="SampId")
-    
-    test.richness.obs.species <- test.data %>%
-      select(SampId) %>%
-      left_join(filter(richness.obs, Rank=="Species"), by="SampId")
-    
-    # Complete observations and inputs for GLM calibration/prediction
-    train.family.model.data <-  train.richness.obs.family %>%
-      left_join(predictors, by="SampId")
-    
-    train.species.model.data <-  train.richness.obs.species %>%
-      left_join(predictors, by="SampId")
-    
-    test.family.model.data <- test.richness.obs.family %>%
-      left_join(predictors, by="SampId")
-    
-    test.species.model.data <-  test.richness.obs.species %>%
-      left_join(predictors, by="SampId")
-    
-    # Calibrate the GLMs using the training data
-    rmf <- glm.nb(f, data = train.family.model.data, link=log)
-    rms <- glm.nb(f, data = train.species.model.data, link=log)
-    
-    test.pred.family <- tibble(SampId = test.richness.obs.family$SampId,
-                               richness.obs = test.richness.obs.family$richness.obs,
-                               richness.pred = predict(rmf, newdata = test.family.model.data, type= "response"),
-                               Rank = "Family",
-                               Type = "Testing",
-                               Fold = fold,
-                               Trial = "Richness model")
-    
-    test.pred.species <- tibble(SampId = test.richness.obs.species$SampId,
-                                richness.obs = test.richness.obs.species$richness.obs,
-                                richness.pred = predict(rms, newdata = test.species.model.data, type= "response"),
-                                Rank = "Species",
-                                Type = "Testing",
-                                Fold = fold,
-                                Trial = "Richness model")
-    
-    train.pred.family <- tibble(SampId = train.family.model.data$SampId, 
-                                richness.obs = train.family.model.data$richness.obs,
-                                richness.pred = rmf$fitted.values,
-                                Rank = "Family",
-                                Type = "Training",
-                                Fold = fold,
-                                Trial = "Richness model")
-    
-    train.pred.species <- tibble(SampId = train.species.model.data$SampId, 
-                                 richness.obs = train.species.model.data$richness.obs,
-                                 richness.pred = rms$fitted.values,
-                                 Rank = "Species",
-                                 Type = "Training",
-                                 Fold = fold,
-                                 Trial = "Richness model")
-    output <- bind_rows(output, train.pred.family, train.pred.species, test.pred.family, test.pred.species)
-    
-  }
-  return(output)
-}
-
 data <- spread(richness.obs, Rank, richness.obs)
 data <- left_join(data, predictors, by="SampId")
 rmf <- glm.nb(Family ~ Temp + Temp2 + FV + F100m + LUD + IAR, data = data, link=log)
 rms <- glm.nb(Species ~ Temp + Temp2 + FV + F100m + LUD + IAR, data = data, link=log)
+
+library(broom)
+rmf.tidy <- tidy(rmf)
+rms.tidy <- tidy(rms)
+
+rmf.tidy[,-1] <- apply(rmf.tidy[,-1],2,function(x){signif(x,2)})
+rms.tidy[,-1] <- apply(rms.tidy[,-1],2,function(x){signif(x,2)})
+# write.csv(rmf.tidy, 'outputs/paper 1 extensions/rmf_parameters.csv')
+# write.csv(rms.tidy, 'outputs/paper 1 extensions/rms_parameters.csv')
+# write.csv(glance(rmf), 'outputs/paper 1 extensions/rmf_model.csv')
+# write.csv(glance(rms), 'outputs/paper 1 extensions/rms_model.csv')
+# 
 
 # Calculate predicted richness of richness model
 richness.rm <- cv.rm(predictors)
@@ -663,9 +620,6 @@ richness.rm <- richness.rm %>%
   ungroup() %>%
   mutate(Trial = "Richness model") %>%
   left_join(richness.obs, by=c("SampId", "Rank"))
-
-# Calculate predicted richness of multi-species model
-cv.FF0 <- cv.jsdm(folder = "FF0")
 
 richness.family.FF0 <- cv.FF0$probability %>%
   left_join(taxonomy.bdms, by = "Taxon") %>%
@@ -707,24 +661,23 @@ plot.data <- bind_rows(richness.FF0, richness.rm)
 plot.data <- filter(plot.data, Type == "Testing")
 
 g1 <- ggplot(plot.data)
-g1 <- g1 + geom_point(aes(x = richness.obs, y = richness.pred, color = Trial), alpha = 0.5)
+g1 <- g1 + geom_point(aes(x = richness.obs, y = richness.pred, color = Trial), alpha = 0.3)
 # g1 <- g1 + facet_grid(Type ~ Rank)
 g1 <- g1 + facet_grid(. ~ Rank)
 g1 <- g1 + geom_abline(intercept = 0, slope = 1, color="black", size=1.25)
 g1 <- g1 + theme_bw(base_size = 20)
-g1 <- g1 + labs(y = "Predicted sample richness",
-                x = "Observed sample richness",
+g1 <- g1 + labs(y = "Predicted richness",
+                x = "Observed richness",
                 color = "Model")
 g1 <- g1 + guides(colour = guide_legend(override.aes = list(size=6)))
 g1 <- g1 + scale_color_brewer(palette = "Set1")
-g1
 
 
 
 # Grid arranged plots ####
-pdf('outputs/paper 1 extensions/P1 - richness.pdf', height=10.5, width=13)
-plot_grid(g1, g2, labels=c("a", "b"), ncol=1, label_size = 20)
-dev.off()
+# pdf('outputs/paper 1 extensions/P1 - richness.pdf', height=10.5, width=13)
+# plot_grid(g1, g2, labels=c("a", "b"), ncol=1, label_size = 20)
+# dev.off()
 
 
 tiff("outputs/paper 1 extensions/P1 - richness.tiff", height = 10.5, width = 13, units = 'in', compression = "lzw", res = 400)
@@ -744,7 +697,7 @@ plot_grid(g1,g2,g3,g4, labels=c("a", "b", "c", "d"), align="hv")
 dev.off()
 
 # plot.comm() [all taxa] ####
-plot.comm(jsdm.FF0, 'P1 - plot_comm [all taxa]')
+plot.comm(fit.FF0, 'P1 - plot_comm [all taxa]')
 
 # plot.comm() [examples] ####
 # Modified plot.comm() code for specific taxa.
@@ -754,8 +707,8 @@ taxa <- c("Gammaridae", "Nemoura_minima", "Protonemura_lateralis")
 
 pdf('outputs/paper 1 extensions/P1 - plot_comm [example taxa].pdf', onefile = TRUE)
 par(cex=1.25)
-for (k in 1:length(inf.fact)){
-  variable <- inf.fact[k]
+for (k in 1:length(K)){
+  variable <- K[k]
   responses <- response.bdms[response.bdms$Taxon %in% taxa, ]
   
   response <- responses[[variable]]
@@ -780,11 +733,11 @@ for (k in 1:length(inf.fact)){
   ymax <- max(ymax$y)
   
   # Plot the community parameter distribution
-  mu <- jsdm$mu.beta.comm.maxpost[variable]
-  sd <- jsdm$sigma.beta.comm.maxpost[variable]
+  mu <- fit.FF0$mu.beta.comm.maxpost[variable]
+  sd <- fit.FF0$sigma.beta.comm.maxpost[variable]
   x <- seq(mu-4*sd,mu+4*sd,length.out=201)
   beta.comm.density <- dnorm(x, mu, sd)
-  beta.taxa.maxpost.density <- density(jsdm$beta.taxa.maxpost[variable, ])
+  beta.taxa.maxpost.density <- density(fit.FF0$beta.taxa.maxpost[variable, ])
   
   # Match expressions to influence factors
   labels <- c("A10m" = expression(paste(beta["A10m"], " (1/%)")),
@@ -795,7 +748,8 @@ for (k in 1:length(inf.fact)){
               "FRI" = expression(paste(beta["FRI"], " (1/%)")),
               "F10m" = expression(paste(beta["F10m"], " (1/%)")),
               "F100m" = expression(paste(beta["F100m"], " (1/%)")),
-              "IAR" = expression(paste(beta["IAR"], " 1/(w"["c"]%*%"f"["c"],")")),
+              # "IAR" = expression(paste(beta["IAR"], " 1/(w"["c"]%*%"f"["c"],")")),
+              "IAR" = expression(paste(beta["IAR"])),
               "Urban" = expression(paste(beta["Urban"], " (1/%)")),
               "LUD" = expression(paste(beta["LUD"], " (km"^2,"/CE)"))
   )
@@ -822,20 +776,19 @@ for (k in 1:length(inf.fact)){
   lines(x, beta.comm.density, type="l", col = "grey50", lwd = 5)
   # Plot maximum posterior values over all taxa
   lines(beta.taxa.maxpost.density, type="l", col="black", lwd=2, lty='longdash')
-  
 }
 dev.off()
 
 # Plot P1 - parameter dotplot [4 pages] ####
 # Warning: really bad code ahead...
 # Extract the entire posterior beta sample
-jsdm.beta.samples <- extract.beta(jsdm.FF0)
+beta.samples <- extract.beta(fit.FF0)
 
-jsdm.beta.samples.quantiles <- jsdm.beta.samples %>%
+beta.samples.quantiles <- beta.samples %>%
   group_by(Variable, Taxon) %>%
   summarise(quantile10=quantile(Value, 0.10), quantile90=quantile(Value, 0.90)) %>%
   setDT()
-colnames(jsdm.beta.samples.quantiles)<- c("Variable", "Taxon", "quantile10", "quantile90")
+colnames(beta.samples.quantiles)<- c("Variable", "Taxon", "quantile10", "quantile90")
 
 isdm.beta <- isdm$parameters
 if ("Model" %in% colnames(isdm.beta)){
@@ -848,13 +801,13 @@ colnames(isdm.beta) <- c("Taxon", "Variable", "iSDM.parameter")
 pages <- 4
 ntpp <- length(n.bdms)/pages
 tpp <- split(n.bdms, ceiling(seq_along(n.bdms)/ntpp)) # bin the number of taxa per page
-pdf(paste("outputs/paper 1 extensions/parameter_dotplot_notnorm.pdf",sep=""), paper = "special", height = 10, width = 9, onefile = TRUE)
+pdf(paste("outputs/paper 1 extensions/P1 - parameter dotplots.pdf",sep=""), paper = "special", height = 10, width = 9, onefile = TRUE)
 for (page in 1:pages){
   
-  plot.data <- jsdm.beta.samples.quantiles[jsdm.beta.samples.quantiles$Taxon %in% names(tpp[page][[1]]), ]
+  plot.data <- beta.samples.quantiles[beta.samples.quantiles$Taxon %in% names(tpp[page][[1]]), ]
   
   # Prepare the jSDM parameter values
-  beta.max <- select(jsdm.FF0$parameters, Taxon, Variable, Parameter)
+  beta.max <- select(fit.FF0$parameters, Taxon, Variable, Parameter)
   colnames(beta.max) <- c("Taxon", "Variable", "jSDM.parameter")
   beta.max$Variable <- as.character(beta.max$Variable)
   
@@ -889,8 +842,8 @@ for (page in 1:pages){
   plot.data$Labels <- factor(paste(plot.data$Taxon, ' - ', n.bdms[plot.data$Taxon]), levels = paste(names(sort(n.bdms)), ' - ', sort(n.bdms)))
   
   # Order variable facets and pass expressions for units in facet labels
-  plot.data$Variable <- factor(plot.data$Variable, levels = c("Temp", "Temp2", "FV", "F10m", "IAR", "Urban", "LUD"))
-  levels(plot.data$Variable) <- labeller(c("Temp", "Temp2", "FV", "F100m", "IAR", "Urban", "LUD"))
+  plot.data$Variable <- factor(plot.data$Variable, levels = c("Temp", "Temp2", "FV", "F100m", "IAR", "LUD"))
+  levels(plot.data$Variable) <- labeller(c("Temp", "Temp2", "FV", "F100m", "IAR", "LUD"))
   
   # Build the plot
   g <- ggplot(plot.data)
@@ -900,7 +853,7 @@ for (page in 1:pages){
   g <- g + facet_grid(. ~ Variable, scales = "free", labeller=label_parsed)
   g <- g + coord_flip()
   g <- g + theme_bw()
-  g <- g + labs(title = "Taxon-specific parameter estimates by model",
+  g <- g + labs(title = "Taxon-specific parameters",
                 subtitle = "MLEs (iSDM) and maximum posterior (UF0) with 10th-90th percentile interval",
                 x = "Taxon and prevalance",
                 y = "Value")
@@ -912,25 +865,25 @@ dev.off()
 
 # Plot P1 - parameter SD ####
 # Extract the entire posterior beta sample
-jsdm.beta.samples <- extract.beta(jsdm.FF0)
+beta.samples <- extract.beta(fit.FF0)
 
 # Fast aggregation of 10M row dataset
-plot.data <- jsdm.beta.samples %>%
+plot.data <- beta.samples %>%
   group_by(Taxon, Variable) %>%
   summarise(SD = sd(Value), Mean = mean(Value)) %>%
-  mutate(n = n.bdms[Taxon], Label = factor(Variable, levels=c("Temp", "Temp2", "FV", "F10m",  "IAR",   "Urban", "LUD")), rSD = SD/abs(Mean))
+  mutate(n = n.bdms[Taxon], Label = factor(Variable, levels=c("Temp", "Temp2", "FV", "F100m",  "LUD", "IAR")), rSD = SD/abs(Mean))
 
 levels(plot.data$Label) <- labeller(levels(plot.data$Label))
-setDT(plot.data)
+
 g <- ggplot(data=plot.data, aes(x = n, y = SD, size = n))
 g <- g + geom_point(alpha = 0.5)
 g <- g + facet_grid(Label ~ ., scales = "free", labeller=label_parsed)
 g <- g + theme_bw(base_size = 14)
 g <- g + theme(strip.background=element_rect(fill="grey"),strip.text=element_text(color="black", face="bold"),
                plot.title = element_text(hjust = 0.5, size = 12))
-g <- g + labs(title = expression(paste("Standard deviation of posterior taxon-specific parameter distributions ", beta["jk"]^"taxa", " in UF0")),
+g <- g + labs(title = expression(paste("Standard deviation of posterior taxon-specific parameter distributions ", beta["kj"]^"taxa", " in UF0")),
               x = "Occurrence frequency",
-              y = expression(paste("Standard deviation (", sigma[beta["jk"]^"taxa"],")")),
+              y = expression(paste("Standard deviation (", sigma[beta["kj"]^"taxa"],")")),
               size = "Occurrence frequency")
 g <- g + scale_y_continuous(limits=c(0,NA))
 
@@ -1312,50 +1265,6 @@ jsdm.TT1$significance <- extract.lat.resp(jsdm.TT1)
 #                         sig.beta.lat.negative = length(jsdm.TT1$significance$significance.beta.lat[jsdm.TT1$significance$significance.beta.lat==-1]),
 #                         sig.beta.lat.neutral = length(jsdm.TT1$significance$significance.beta.lat[jsdm.TT1$significance$significance.beta.lat==0])
 #                         )
-
-# Correlation matrix ####
-library(corrplot)
-# Attempt 1: 
-# Compute the linear predictor for the latent variable and try to plot it
-n <- occur.freq(jsdm.TT1$occur.taxa)
-beta.lat.maxpost <- jsdm.TT1$beta.lat.maxpost[names(n)]
-
-lv <- sapply(beta.lat.maxpost, function(j){
-  j * jsdm.TT1$x.lat.maxpost
-})
-
-lv.corr <- lv[, names(n[n>10])]
-lv.corr <- cor(lv.corr)
-
-colnames(lv.corr) <- 1:ncol(lv.corr)
-rownames(lv.corr) <- 1:nrow(lv.corr)
-corrplot(lv.corr, method="circle", type="upper", order="hclust", tl.pos="n")
-
-# Attempt 2: rereading Warton (2015) shows they plot correlations among the factor loadings (lambda_j), i.e., the beta^lat
-# Just plot the correlations among the marginal posterior distributions of the factor loadings!
-beta.lat <- jsdm.TT1$TT1$beta.lat
-beta.lat.maxpost <- jsdm.TT1$TT1$beta.lat.maxpost
-
-# Identify taxa with significant factor loadings and n > 10
-beta.lat.sig <- names(jsdm.TT1$significance$significance.beta.lat[jsdm.TT1$significance$significance.beta.lat != 0])
-n <- occur.freq(jsdm.TT1$TT1$occur.taxa)
-taxa <- intersect(names(n[n>10]), beta.lat.sig)
-
-beta.lat.taxa <- beta.lat[, taxa]
-
-# Keep taxa only with significant factor loadings AND more than 10 presence observations
-lv.corr <- cor(beta.lat.taxa)
-
-colnames(lv.corr) <- 1:ncol(lv.corr)
-rownames(lv.corr) <- 1:nrow(lv.corr)
-
-corrplot(lv.corr, method="square", diag = FALSE, type="lower", tl.pos="n")
-
-# # take the max posterior
-# beta.lat.taxa <- beta.lat.maxpost[taxa]
-# lv.matrix <- matrix(beta.lat.taxa, nrow=length(taxa), ncol=length(taxa), byrow = TRUE)
-# lv.corr.maxpost <- cor(lv.matrix)
-# corrplot(lv.corr.maxpost)
 
 # Parameter uncertainty ####
 beta.samples.FF0 <- extract.beta(jsdm.FF0)

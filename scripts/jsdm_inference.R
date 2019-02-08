@@ -216,6 +216,46 @@ for ( i in 1:n.chain )
     init[[i]][["sigma_gamma"]] <- data$sigma_gamma_pripar
     init[[i]][["gamma_site"]] <- rep(0,n.sites)
   }
+  if ( n.latent > 1){
+    if (lat.site){
+      init[[i]][["x_lat"]] <- matrix(0, nrow = n.sites, ncol = n.latent)
+    } else{
+      init[[i]][["x_lat"]] <- matrix(0, nrow = n.samples, ncol = n.latent)
+    }
+    init[[i]][["x_lat"]][4,1] <- 1
+    init[[i]][["x_lat"]][14,1] <- 1
+    init[[i]][["x_lat"]][24,1] <- 1
+    
+    init[[i]][["x_lat"]][5,1] <- -1
+    init[[i]][["x_lat"]][15,1] <- -1
+    init[[i]][["x_lat"]][22,1] <- -1
+    
+    init[[i]][["x_lat"]][2,2] <- 1 
+    init[[i]][["x_lat"]][10,2] <- 1 
+    init[[i]][["x_lat"]][18,2] <- 1
+    
+    init[[i]][["x_lat"]][6,2] <- -1
+    init[[i]][["x_lat"]][8,2] <- -1 
+    init[[i]][["x_lat"]][21,2] <- -1
+    
+    init[[i]][["beta_lat"]] <- matrix(0, nrow = n.latent, ncol = n.taxa)
+    
+    init[[i]][["beta_lat"]][1,16] <- 1
+    init[[i]][["beta_lat"]][1,17] <- 1
+    init[[i]][["beta_lat"]][1,20] <- 1
+    init[[i]][["beta_lat"]][1,27] <- 1
+    init[[i]][["beta_lat"]][1,32] <- 1
+    
+    init[[i]][["beta_lat"]][1,7] <- -1
+    
+    init[[i]][["beta_lat"]][2,35] <- 1 
+    init[[i]][["beta_lat"]][2,34] <- 1 
+    init[[i]][["beta_lat"]][2,38] <- 1
+    
+    init[[i]][["beta_lat"]][2,2] <- -1
+    init[[i]][["beta_lat"]][2,5] <- -1 
+    init[[i]][["beta_lat"]][2,11] <- -1
+  }
 }
 
 
@@ -410,15 +450,28 @@ if ( n.latent > 1 )
                         sep="")
   }
   model.code <- paste(model.code,
-                      "      if ( k==1 && i==11)\n",
+                      "      if ( k==1 && (i==4 || i==14 || i==24))\n",
                       "        x_lat[i,k] ~ normal(0,1) T[0,];\n",
-                      "      else if (k==2 && i==13)\n",
+                      "      else if (k==1 && (i==5 || i==15 || i==22))\n",
+                      "        x_lat[i,k] ~ normal(0,1) T[,0];\n",
+                      "      else if ( k==2 && (i==2 || i==10 || i==18))\n",
                       "        x_lat[i,k] ~ normal(0,1) T[0,];\n",
+                      "      else if (k==2 && (i==6 || i==8 || i==21))\n",
+                      "        x_lat[i,k] ~ normal(0,1) T[,0];\n",
                       "      else\n",
                       "        x_lat[i,k] ~ normal(0,1);\n",
                       "    }\n",
                       "    for ( j in 1:n_taxa ) {\n",
-                      "      beta_lat[k,j] ~ normal(0,sigma_beta_lat);\n",
+                      "      if ( k==1 && (j==16 || j==17 || j==20 || j==27 || j==32))\n",
+                      "        beta_lat[k,j] ~ normal(0,sigma_beta_lat) T[0,];\n",
+                      "      else if ( k==1 && j==7 )\n",
+                      "        beta_lat[k,j] ~ normal(0,sigma_beta_lat) T[,0];\n",
+                      "      else if ( k==2 && (j==34 || j==35 || j==38))\n",
+                      "        beta_lat[k,j] ~ normal(0,sigma_beta_lat) T[0,];\n",
+                      "      else if ( k==2 && (j==2 || j==5 || j==11))\n",
+                      "        beta_lat[k,j] ~ normal(0,sigma_beta_lat) T[,0];\n",
+                      "      else\n",
+                      "        beta_lat[k,j] ~ normal(0,sigma_beta_lat);\n",
                       "    }\n",
                       "  }\n",
                       sep="")

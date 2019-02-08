@@ -1,3 +1,40 @@
+# Variable selection ####
+vs.bdms <- extract.vsr("variable_selection/paper 2/variable_selection_bdms", sample.bdms)
+
+# Get mean relative deviance for each model over entire community (excluding rare taxa)
+vs.bdms.mean <- vs.bdms %>%
+  filter(!is.infinite(rdev.test) & n > 56) %>%
+  group_by(Model) %>%
+  summarise(mrd.train = mean(rdev.train, na.rm=TRUE), mrd.test = mean(rdev.test, na.rm=TRUE)) %>%
+  arrange(mrd.test) %>%
+  mutate(Parameters = vapply(strsplit(Model, " "), length, integer(1)) + 1)
+
+# count the number of explanatory variables (as opposed to number of parameters)
+vs.bdms.mean$ExpVar <- sapply(vs.bdms.mean$Model, function(i){
+  i <- strsplit(i," ")[[1]]
+  i <- i[!i %in% c("FV2", "Temp2")]
+  uniqueN(i)
+})
+
+plot.data <- vs.bdms.mean %>%
+  arrange(Parameters) %>%
+  group_by(Parameters) %>%
+  mutate(Label = paste(Parameters, " (", formatC(uniqueN(Model), big.mark=",")," models)", sep="")) %>%
+  ungroup() %>%
+  mutate(Label = factor(Label, levels = unique(Label)))
+
+g <- ggplot(plot.data, aes(x = mrd.train, y = mrd.test, color = as.factor(Label)))
+g <- g + geom_point(alpha=0.35)
+g <- g + geom_abline(intercept = 0, slope = 1, color="black", size=1.25)
+g <- g + theme_bw(base_size = 18)
+# g <- g + theme_gray(base_size = 17) # gray improves contrast
+g <- g + labs(y = "Mean standardized deviance during prediction",
+              x = "Mean standardized deviance during calibration",
+              color = "Number of\nparameters")
+g <- g + guides(colour = guide_legend(override.aes = list(size=6)))
+g <- g + scale_colour_brewer(palette = "Set1")
+print(g)
+
 # deploy.jsdm() ####
 K <- c("A10m", "IAR", "LUD", "Urban", "bFRI", "FRI", "FV", "WV", "Temp", "Temp2")
 deploy.jsdm(K, sample.bdms, "bdms", center=T, cv=0)
@@ -34,22 +71,22 @@ taxonomy.invfp <- get.taxonomy(sample.invfp)
 taxonomy.ept <- taxonomy.bdms[Order %in% c("Ephemeroptera", "Plecoptera", "Trichoptera"),]
 
 # extract.jsdm(results) ####
-# Results: paper 1 BDM species
-p1.results.re <- extract.jsdm('outputs/jsdm_p1', 'RE', epsilon=TRUE)
-p1.results <- extract.jsdm('outputs/jsdm_p1', 'noRE', epsilon=FALSE)
-
 # Results: paper 2 BDM family/species
-# jsdm.results <- extract.jsdm(trials)
-jsdm.bdmf <- extract.jsdm("outputs/jsdm_p2/full model", "bdmf", epsilon=FALSE)
-jsdm.bdms <- extract.jsdm("outputs/jsdm_p2/full model", "bdms", epsilon=FALSE)
+# fit.FF0 <- extract.jsdm('outputs/paper 1 extensions', 'FF0')
+directory <- 'outputs/paper 2 results/full model'
+folder <- 'FF0_bdmf'
+full.path <- paste(getwd(), directory, folder, sep="/")
+
+fit.bdmf <- extract.jsdm('outputs/paper 2 results/full model', 'FF0_bdmf')
+fit.bdms <- extract.jsdm('outputs/paper 2 results/full model', 'FF0_bdms')
 
 # Calibration: combined families
-jsdm.invf <- extract.jsdm("outputs/jsdm_p2/full model", "invf")
-jsdm.invfp <- extract.jsdm("outputs/jsdm_p2/full model", "invfp")
+fit.invf <- extract.jsdm('outputs/paper 2 results/full model', 'FF0_invf')
+fit.invfp <- extract.jsdm('outputs/paper 2 results/full model', 'FF0_invfp')
 
 # cv.jsdm(jsdm.results) ####
-jsdm.cv.bdm <- cv.jsdm(c("bdmf", "bdms"))
-jsdm.cv.inv <- cv.jsdm(c("invf", "invfp"))
+cv.bdms <- cv.jsdm('outputs/paper 2 results/full model', 'FF0_bdms')
+cv.bdmf <- cv.jsdm('outputs/paper 2 results/full model', 'FF0_bdmf')
 
 # map.jsdm(results) ####
 map.jsdm.pred(jsdm.bdmf, 'P2 maps bdmf')
@@ -58,10 +95,10 @@ map.jsdm.pred(jsdm.invf, 'P2 maps invf')
 map.jsdm.pred(jsdm.invfp, 'P2 maps invf')
 
 # plot.prob(results) ####
-plot.prob(jsdm.bdmf, 'P2 prob bdmf')
-plot.prob(jsdm.invf, 'P2 prob invf')
-plot.prob(jsdm.bdms, 'P2 prob bdms')
-plot.prob(jsdm.invfp, 'P2 prob invfp')
+plot.prob(fit.bdmf, 'outputs/paper 2 results/P2 prob bdmf')
+plot.prob(fit.invf, 'P2 prob invf') # error thrown here
+plot.prob(fit.bdms, 'P2 prob bdms')
+plot.prob(fit.invfp, 'P2 prob invfp')
 
 # plot.comm(results) ####
 plot.comm(jsdm.bdmf, 'P2 parameters bdmf')
@@ -176,10 +213,10 @@ g <- g + scale_fill_brewer(palette = "Set1")
 print(g)
 
 # linear.predictor(results) ####
-slopes.bdmf <- linear.predictor(jsdm.bdmf)
-slopes.bdms <- linear.predictor(jsdm.bdms)
-slopes.invf <- linear.predictor(jsdm.invf)
-slopes.invfp <- linear.predictor(jsdm.invfp)
+slopes.bdmf <- linear.predictor(fit.bdmf)
+slopes.bdms <- linear.predictor(fit.bdms)
+slopes.invf <- linear.predictor(fit.invf)
+slopes.invfp <- linear.predictor(fit.invfp)
 
 slopes.bdmf$Trial <- "BDMf"
 slopes.bdms$Trial <- "BDMs"
@@ -217,10 +254,13 @@ g <- g + theme(axis.title.x=element_blank(),
                panel.grid.minor = element_blank()
 )
 g <- g + scale_fill_brewer(palette = "Set1")
-g <- g + labs(y = expression(paste("z"["range,kj"])),
+g <- g + labs(y = expression(paste("z"["kj"]^"range")),
               fill = "Dataset")
 print(g)
 
+pdf('outputs/paper 2 results/P2 z-range by dataset.pdf', width = 14)
+print(g)
+dev.off()
 # # Experiment with ridge plot... densities of z-range don't work well as they are too wide
 # g <- ggplot(plot.data)
 # g <- g + stat_density_ridges(aes(x = z.range, y = Trial, fill = Trial), alpha = 0.5)
@@ -230,50 +270,50 @@ print(g)
 # print(g)
 
 # Plot exp. var. by dataset ####
-x.invf <- prepare.inputs(c("A10m", "IAR", "LUD", "Urban", "bFRI", "FRI", "FV", "WV", "Temp", "Temp2"), sample.invf, center=FALSE)
-x.invf$Trial <- "CFCH"
+plot.data <- tibble()
+datasets <- c("sample.bdmf", "sample.invf", "sample.invfp")
+for (d in 1:length(datasets)){
+  dataset <- datasets[d]
+  K <- c("A10m", "IAR", "LUD", "Urban", "bFRI", "FRI", "FV", "Temp")
+  dt <- prepare.inputs(K, get(dataset), center = F)
+  dt <- gather(dt, Variable, Value, -SiteId, -SampId)
+  dt$Trial <- dataset
+  plot.data <- bind_rows(plot.data, dt)
+}
 
-x.bdm <- prepare.inputs(c("A10m", "IAR", "LUD", "Urban", "bFRI", "FRI", "FV", "WV", "Temp", "Temp2"), sample.bdms, center=FALSE)
-x.bdm$Trial <- "BDM"
 
-x.invfp <- prepare.inputs(c("A10m", "IAR", "LUD", "Urban", "bFRI", "FRI", "FV", "WV", "Temp", "Temp2"), sample.invfp, center=FALSE)
-x.invfp$Trial <- "CFp"
+plot.data$Trial <- ifelse(plot.data$Trial=="sample.bdmf", "BDM", plot.data$Trial)
+plot.data$Trial <- ifelse(plot.data$Trial=="sample.invf", "CFCH", plot.data$Trial)
+plot.data$Trial <- ifelse(plot.data$Trial=="sample.invfp", "CFp", plot.data$Trial)
 
-x <- bind_rows(x.invf, x.invfp, x.bdm)
-x <- gather(x, Variable, Value, -SiteId, -SampId, -Trial)
-x <- filter(x, Variable != "Temp2")
-rm(x.bdm, x.invf, x.invfp)
-setDT(x)
+plot.data <- filter(plot.data, Variable != "Temp2")
+# inputs.datasets$Label <- labeller(inputs.datasets$Variable)
 
-x$VariableLabel <- factor(x$Variable, levels = unique(x$Variable))
-levels(x$VariableLabel) <- labeller(levels(x$VariableLabel))
-x <- na.omit(x)
+plot.data$Label <- factor(plot.data$Variable, levels = K[K !="Temp2"])
+levels(plot.data$Label) <- labeller(levels(plot.data$Label))
 
-x$Trial <- factor(x$Trial, levels = c("BDM", "CFCH", "CFp"))
-
-g <- ggplot(data = x)
-g <- g + geom_boxplot(aes(x=Trial, y=Value, fill=Trial, order = TRUE))
+# Boxplots
+g <- ggplot(plot.data)
+g <- g + geom_boxplot(aes(x=Trial, y=Value, fill=Trial), position = position_dodge2(preserve = "total"))
 g <- g + stat_summary(aes(x=Trial, y=Value), fun.y=median, colour="black", fill="black", geom="point", 
-             shape=21, size=3, show.legend = FALSE)
-g <- g + facet_wrap(~ VariableLabel, scales="free_x", ncol=3, labeller=label_parsed, strip.position = "bottom")
-g <- g + coord_flip()
-g <- g + theme_bw(base_size = 24)
-g <- g + theme(strip.background = element_blank(), 
-               strip.placement = "outside",
-               plot.title = element_blank(),
-               
-               axis.text.y=element_blank(),
-               axis.ticks.y=element_blank(),
-               axis.title.y=element_blank(),
-               axis.title.x=element_blank(),
-               panel.grid.major.x = element_blank()
-)
+                      shape=21, size=3, show.legend = FALSE)
+g <- g + facet_wrap(~Label, scales="free", labeller=label_parsed, strip.position="bottom")
+
+g <- g + theme_bw(base_size=20)
 g <- g + labs(fill = "Dataset")
-g <- g + scale_fill_manual(values=c("#377eb8", "#4daf4a", "#984ea3"))
-print(g)
+g <- g + theme(strip.background = element_blank(), strip.placement = "outside",
+               plot.title = element_blank(),
+               axis.title.x = element_blank(),
+               axis.title.y = element_blank(),
+               axis.text.y = element_blank(),
+               axis.ticks.y = element_blank())
+g <- g + scale_x_discrete(limits=c("CFp", "CFCH", "BDM"))
+# g <- g + scale_fill_brewer(palette="Set2")
+g <- g + scale_fill_manual(values=c("BDM"="#377eb8", "CFCH"="#4daf4a", "CFp"="#984ea3"))
+g <- g + coord_flip()
+g
 
-
-pdf('P2 explanatory variables.pdf', width=13, height=7)
+pdf('outputs/paper 2 results/P2 explanatory variables.pdf', width=13, height=7)
 print(g)
 dev.off()
 
@@ -394,13 +434,13 @@ n.bdmf.ept <- n.bdmf[names(n.bdmf) %in% taxonomy.ept$Family]
 n.bdms.ept <- n.bdms[names(n.bdms) %in% taxonomy.ept$Taxon]
 
 # Get BDMf taxonomy.ept deviance
-dev.bdmf <- filter(jsdm.bdmf$deviance, Taxon %in% names(n.bdmf.ept))
+dev.bdmf <- filter(fit.bdmf$deviance, Taxon %in% names(n.bdmf.ept))
 dev.bdmf$Family <- dev.bdmf$Taxon
 dev.bdmf$Rank <- "Family"
 
 # Obtain data for BDMs
 dev.bdms <- taxonomy.ept %>%
-  left_join(jsdm.bdms$deviance, by = "Taxon") %>%
+  left_join(fit.bdms$deviance, by = "Taxon") %>%
   filter(Rank != "Family") %>%
   select_(.dots = c(colnames(dev.bdmf), "Family", "Rank"))
 
@@ -410,12 +450,12 @@ plot.data <- dev.taxonomy.bdm
 rm(dev.bdmf, dev.bdms)
 
 # Assign occurrence frequency based on whether taxon is in BDMf or not
-plot.data$n <- ifelse(plot.data$Trial == 'bdmf', n.bdmf.ept[plot.data$Taxon], n.bdms.ept[plot.data$Taxon])
+plot.data$n.present <- ifelse(plot.data$Model == 'FF0_bdmf', n.bdmf.ept[plot.data$Taxon], n.bdms.ept[plot.data$Taxon])
 # Label and order based on family occurrence frequency in BDM families
 plot.data$Label <- factor(paste(plot.data$Family, ' - ', n.bdmf.ept[plot.data$Family]), levels = paste(names(sort(n.bdmf.ept, decreasing = TRUE)), ' - ', sort(n.bdmf.ept, decreasing = TRUE)))
 
 # P2 Deviance per family and by rank
-g <- ggplot(plot.data, aes(x = Label, y = std.res.dev, color = Rank, size = n, label = Taxon))
+g <- ggplot(plot.data, aes(x = Label, y = std.deviance, color = Rank, size = n.present, label = Taxon))
 g <- g + geom_point(alpha=0.6)
 # g <- g + scale_size_continuous(range = c(2,7))
 g <- g + scale_radius(range = c(2,8))
@@ -425,11 +465,11 @@ g <- g + theme(axis.text.x = element_text(angle=45,hjust=1),
 g <- g + guides(colour = guide_legend(override.aes = list(size=6)))
 g <- g + labs(title="Quality of fit for EPT taxa in BDM",
               y="Standardized deviance",
-              x="Family (labelled and ordered by decreasing prevalence from left)",
-              size="Prevalence",
+              x="Family (labelled and ordered by number of occurrences)",
+              size="Number of\noccurrences",
               color="Rank")
-g <- ggplotly(g)
-pdf('P2 QoF [deviance] by resolution.pdf', height=8.5, width=15)
+# g <- ggplotly(g)
+pdf('outputs/paper 2 results/P2 fit by resolution.pdf', height=8.5, width=15)
 print(g)
 dev.off()
 
@@ -440,7 +480,7 @@ dev.off()
 
 
 # P2 D2 per family and by rank
-g <- ggplot(plot.data, aes(x = Label, y = D2, color = Rank, size = n, label = Taxon))
+g <- ggplot(plot.data, aes(x = Label, y = D2, color = Rank, size = n.present, label = Taxon))
 g <- g + geom_point(alpha=0.6)
 g <- g + scale_radius(range = c(2,8))
 g <- g + theme_bw(base_size = 18)
@@ -449,11 +489,11 @@ g <- g + theme(plot.title = element_blank(),
 g <- g + guides(colour = guide_legend(override.aes = list(size=6)))
 g <- g + labs(title="Explanatory power for EPT taxa in BDM",
               # y=expression(paste("D"^2)),
-              x="Family (labelled and ordered by decreasing prevalence from left)",
-              size="Prevalence",
+              x="Family (labelled and ordered by number of occurrences)",
+              size="Number of\noccurrences",
               color="Rank")
-g <- ggplotly(g)
-pdf('P2 QoF [D2] by resolution.pdf', height=8.5, width=15)
+# g <- ggplotly(g)
+pdf('outputs/paper 2 results/P2 D2 by resolution.pdf', height=8.5, width=15)
 print(g)
 dev.off()
 
@@ -473,45 +513,45 @@ g <- g + labs(title="Explanatory power vs quality of fit for EPT",
 g <- g + scale_color_brewer(palette = "Set1")
 print(g)
 
-
 # P2 pred by resolution ####
-dev.bdmf <- jsdm.cv.bdm$deviance %>%
+dev.bdmf <- cv.bdmf$deviance %>%
   group_by(Type, Trial, Taxon) %>%
   summarise(mean.std.deviance = mean(std.deviance)) %>%
   ungroup() %>%
-  filter(Trial == 'bdmf', Taxon %in% names(n.bdmf.ept)) %>%
+  filter(Trial == 'FF0_bdmf', Taxon %in% names(n.bdmf.ept)) %>%
   mutate(Family = Taxon, Rank = "Family")
 
-dev.bdms <- jsdm.cv.bdm$deviance %>%
+dev.bdms <- cv.bdms$deviance %>%
   group_by(Type, Trial, Taxon) %>%
   summarise(mean.std.deviance = mean(std.deviance)) %>%
   ungroup() %>%
-  filter(Trial == 'bdms', Taxon %in% names(n.bdms.ept)) %>%
+  filter(Trial == 'FF0_bdms', Taxon %in% names(n.bdms.ept)) %>%
   left_join(taxonomy.ept, by = "Taxon")
 
 plot.data <- dev.bdms[, colnames(dev.bdmf)] %>%
-  bind_rows(dev.bdmf)
-rm(dev.bdmf, dev.bdms)
+  bind_rows(dev.bdmf) %>%
+  filter(!(Taxon %in% c("Goeridae", "Hydroptilidae", "Lepidostomatidae")))
+# rm(dev.bdmf, dev.bdms)
 
-# For families in BDMf and BDMs, keep only BDMs performance
-test <- plot.data %>% 
-  filter(Rank=="Family") %>% 
-  group_by(Family) %>% 
-  summarise(n=n()) %>% 
-  filter(n > 2)
-test <- filter(plot.data, Taxon %in% test$Family, Trial == 'bdms')
-plot.data <- filter(plot.data, !(Taxon %in% unique(test$Family)))
-rm(test)
+# # For families in BDMf and BDMs, keep only BDMs performance
+# test <- plot.data %>% 
+#   filter(Rank=="Family") %>% 
+#   group_by(Family) %>% 
+#   summarise(n=n()) %>% 
+#   filter(n > 2)
+# test <- filter(plot.data, Taxon %in% test$Family, Trial == 'bdms')
+# plot.data <- filter(plot.data, !(Taxon %in% unique(test$Family)))
+# rm(test)
 
 # Assign occurrence frequency based on whether taxon is in BDMf or not
-plot.data$n <- ifelse(plot.data$Trial == 'bdmf', n.bdmf.ept[plot.data$Taxon], n.bdms.ept[plot.data$Taxon])
+plot.data$n.present <- ifelse(plot.data$Trial == 'FF0_bdmf', n.bdmf.ept[plot.data$Taxon], n.bdms.ept[plot.data$Taxon])
 # Label and order based on family occurrence frequency in BDM families
 plot.data$TaxonLabel <- factor(paste(plot.data$Family, ' - ', n.bdmf.ept[plot.data$Family]), levels = paste(names(sort(n.bdmf.ept, decreasing = TRUE)), ' - ', sort(n.bdmf.ept, decreasing = TRUE)))
 plot.data$Type <- factor(plot.data$Type, levels=c("Training", "Testing"))
 
 # Facet by Training and Testing
 g <- ggplot(data = plot.data)
-g <- g + geom_point(aes(x = TaxonLabel, y = mean.std.deviance, color = Rank, size = n), alpha = 0.6)
+g <- g + geom_point(aes(x = TaxonLabel, y = mean.std.deviance, color = Rank, size = n.present), alpha = 0.6)
 g <- g + facet_grid(Type ~ .)
 g <- g + scale_radius(range = c(2,8))
 g <- g + theme_bw(base_size = 18)
@@ -519,10 +559,11 @@ g <- g + theme(plot.title = element_blank(),
                axis.text.x = element_text(angle=45,hjust=1))
 g <- g + guides(colour = guide_legend(override.aes = list(size=6)))
 g <- g + labs(y="Mean standardized deviance",
-              x="Family (labelled and ordered by decreasing prevalence from left)",
-              size="Prevalence",
+              x="Family (labelled and ordered by number of occurrences)",
+              size="Number of\noccurrences",
               color="Rank")
-pdf('P2 pred by resolution [facet].pdf', height=8.5, width=15)
+
+pdf('outputs/paper 2 results/P2 pred by resolution [facet].pdf', height=8.5, width=15)
 print(g)
 dev.off()
 
@@ -530,17 +571,31 @@ dev.off()
 plot.data <- filter(plot.data, Type=="Testing")
 
 g <- ggplot(data = plot.data)
-g <- g + geom_point(aes(x = TaxonLabel, y = mean.std.deviance, color = Rank, size = n), alpha = 0.6)
+g <- g + geom_point(aes(x = TaxonLabel, y = mean.std.deviance, color = Rank, size = n.present), alpha = 0.6)
 g <- g + scale_radius(range = c(2,8))
 g <- g + theme_bw(base_size = 18)
 g <- g + theme(plot.title = element_blank(),
                axis.text.x = element_text(angle=45,hjust=1))
 g <- g + guides(colour = guide_legend(override.aes = list(size=6)))
 g <- g + labs(y="Mean standardized deviance",
-              x="Family (labelled and ordered by decreasing prevalence from left)",
-              size="Prevalence",
+              x="Family (labelled and ordered by number of occurrences)",
+              size="Number of\noccurrences",
               color="Rank")
-pdf('P2 pred by resolution [testing only].pdf', height=8.5, width=15)
+
+# D^2 is calculated based on quality of fit, not during cross-validation
+# g <- ggplot(data = plot.data)
+# g <- g + geom_point(aes(x = TaxonLabel, y = D2, color = Rank, size = n.present), alpha = 0.6)
+# g <- g + scale_radius(range = c(2,8))
+# g <- g + theme_bw(base_size = 18)
+# g <- g + theme(plot.title = element_blank(),
+#                axis.text.x = element_text(angle=45,hjust=1))
+# g <- g + guides(colour = guide_legend(override.aes = list(size=6)))
+# g <- g + labs(y=expression(paste("D"^2)),
+#               x="Family (labelled and ordered by number of occurrences)",
+#               size="Number of\noccurrences",
+#               color="Rank")
+
+pdf('outputs/paper 2 results/P2 pred by resolution [testing only].pdf', height=8.5, width=15)
 print(g)
 dev.off()
 
@@ -678,50 +733,8 @@ predictors <- predictors %>%
 
 write.csv(predictors, "predictors_impact.csv", row.names=F)
 
-# Plot inputs ####
-inputs.datasets <- data.table()
-datasets <- c("sample.bdmf", "sample.invf", "sample.invfp")
-for (d in 1:length(datasets)){
-  dataset <- datasets[d]
-  K <- c("A10m", "IAR", "LUD", "Urban", "bFRI", "FRI", "FV", "Temp")
-  dt <- prepare.inputs(k, get(dataset), center = F)
-  dt <- gather(dt, Variable, Value, -SiteId, -SampId)
-  dt$Trial <- dataset
-  inputs.datasets <- bind_rows(inputs.datasets, dt)
-}
-
-
-inputs.datasets$Trial <- ifelse(inputs.datasets$Trial=="sample.bdmf", "BDM", inputs.datasets$Trial)
-inputs.datasets$Trial <- ifelse(inputs.datasets$Trial=="sample.invf", "CFCH", inputs.datasets$Trial)
-inputs.datasets$Trial <- ifelse(inputs.datasets$Trial=="sample.invfp", "CFp", inputs.datasets$Trial)
-
-inputs.datasets <- filter(inputs.datasets, Variable != "Temp2")
-# inputs.datasets$Label <- labeller(inputs.datasets$Variable)
-
-inputs.datasets$Label <- factor(inputs.datasets$Variable, levels = K[K !="Temp2"])
-levels(inputs.datasets$Label) <- labeller(levels(inputs.datasets$Label))
-
-# Boxplots
-g <- ggplot(inputs.datasets)
-g <- g + geom_boxplot(aes(x=Trial, y=Value, fill=Trial), position = position_dodge2(preserve = "total"))
-g <- g + facet_wrap(~Label, scales="free", labeller=label_parsed, strip.position="bottom")
-
-g <- g + theme_bw(base_size=20)
-g <- g + labs(fill = "Dataset")
-g <- g + theme(strip.background = element_blank(), strip.placement = "outside",
-               plot.title = element_blank(),
-               axis.title.x = element_blank(),
-               axis.title.y = element_blank(),
-               axis.text.y = element_blank(),
-               axis.ticks.y = element_blank())
-g <- g + scale_x_discrete(limits=c("CFp", "CFCH", "BDM"))
-# g <- g + scale_fill_brewer(palette="Set2")
-g <- g + scale_fill_manual(values=c("BDM"="#377eb8", "CFCH"="#4daf4a", "CFp"="#984ea3"))
-g <- g + coord_flip()
-g
-
 # Density plots
-g <- ggplot(inputs.datasets)
+g <- ggplot(plot.data)
 g <- g + geom_density(aes(x=Value, fill=Trial), alpha=0.5)
 g <- g + facet_wrap(~Label, scales="free", labeller=label_parsed, strip.position="bottom")
 g <- g + theme_bw(base_size=20)
@@ -773,16 +786,44 @@ g
 # grid.arrange(grobs=gs[select_grobs(lay)], layout_matrix=lay)
 # grid.arrange(g.baetidae, g.alpinus, g.rhodani, g.muticus, nrow=2)
 
-# Grid-arranged maps ####
-g1 <- map.jsdm.pred.taxon(jsdm.bdmf, "Baetidae", legend=FALSE)
-g2 <- map.jsdm.pred.taxon(jsdm.bdms, "Baetis_alpinus", legend=FALSE)
-g3 <- map.jsdm.pred.taxon(jsdm.bdms, "Baetis_rhodani", legend=FALSE)
-g4 <- map.jsdm.pred.taxon(jsdm.bdms, "Baetis_muticus", legend=FALSE)
+# Baetidae grid-arranged maps ####
+g1 <- map.jsdm.pred.taxon(fit.bdmf, "Baetidae", legend=TRUE)
+g2 <- map.jsdm.pred.taxon(fit.bdms, "Baetis_alpinus", legend=TRUE)
+g3 <- map.jsdm.pred.taxon(fit.bdms, "Baetis_rhodani", legend=TRUE)
+g4 <- map.jsdm.pred.taxon(fit.bdms, "Baetis_muticus", legend=TRUE)
+
+# ggarrange() gives grid lines whereas plot_grid() does not
+# See: https://github.com/tidyverse/ggplot2/issues/2071
 ggarrange(g1,g2,g3,g4, ncol=2, nrow=2, common.legend = TRUE, legend="right")
 
-pdf('P2 maps example taxa.pdf', width=13, height=9.5)
+svg('outputs/paper 2 results/P2 maps example taxa.svg', width=13, height=9.5)
+ggarrange(plotlist=list(g1,g2,g3,g4), ncol=2, nrow=2, common.legend = TRUE, legend="right",
+          labels=c("(a)", "(b)", "(c)", "(d)"))
+dev.off()
+
+g1 <- map.jsdm.pred.taxon(fit.bdmf, "Baetidae", legend=FALSE)
+g2 <- map.jsdm.pred.taxon(fit.bdms, "Baetis_alpinus", legend=FALSE)
+g3 <- map.jsdm.pred.taxon(fit.bdms, "Baetis_rhodani", legend=FALSE)
+g4 <- map.jsdm.pred.taxon(fit.bdms, "Baetis_muticus", legend=FALSE)
+
+# plot_grid() PDF: doesn't produce a common legend!
+pdf('outputs/paper 2 results/P2 maps example taxa.pdf', width=13, height=9.5)
 plot_grid(g1,g2,g3,g4, labels=c("(a)", "(b)", "(c)", "(d)"), align="hv")
 dev.off()
+
+# plot_grid() SVG: doesn't produce a common legend
+svg('outputs/paper 2 results/P2 maps example taxa.svg', width=13, height=9.5)
+plot_grid(g1,g2,g3,g4, labels=c("(a)", "(b)", "(c)", "(d)"), align="hv")
+dev.off()
+
+svg('outputs/paper 2 results/P2 map Gammaridae.svg')
+g.gammaridae <- map.jsdm.pred.taxon(fit.bdms, "Gammaridae", d.squared = TRUE, legend = TRUE)
+print(g.gammaridae)
+dev.off()
+
+# pdf('outputs/paper 2 results/P2 map Gammaridae.pdf')
+# print(g.gammaridae)
+# dev.off()
 
 # Calculate how often taxon responses are significant per variable
 # and now for my most shameful hack...
@@ -825,6 +866,51 @@ g <- g + scale_x_discrete(position = "top")
 g <- g + labs(title="Significant differences in response between combined families CH vs plateau",
               subtitle="A parameter is statistically similar if the posterior mean is within the 95% CI of its counterpart")
 
+# Epeorus grid-arranged plots ####
+map.alpicola <- map.jsdm.pred.taxon(jsdm = fit.bdms, taxon = "Epeorus_alpicola", legend = TRUE)
+map.assimilis <- map.jsdm.pred.taxon(jsdm = fit.bdms, taxon = "Epeorus_assimilis", legend = TRUE)
+
+# E. alpicola has significant responses to Urban, bFRI, FV, and Temp
+p.alpicola <- list()
+p.alpicola$urban <- plot.prob.taxon(fit.bdms, "Epeorus_alpicola", variables = "Urban", marginal.density = TRUE, legend = FALSE)
+p.alpicola$bfri <- plot.prob.taxon(fit.bdms, "Epeorus_alpicola", variables = "bFRI", marginal.density = TRUE, legend = FALSE)
+p.alpicola$fv <- plot.prob.taxon(fit.bdms, "Epeorus_alpicola", variables = "FV", marginal.density = TRUE, legend = FALSE)
+p.alpicola$temp <- plot.prob.taxon(fit.bdms, "Epeorus_alpicola", variables = "Temp", marginal.density = TRUE, legend = FALSE)
+
+# E. assimilis has significant responses to A10m, IAR, LUD, Urban, and WV
+p.assimilis <- list()
+p.assimilis$a10m <- plot.prob.taxon(fit.bdms, "Epeorus_assimilis", variables = "A10m", marginal.density = TRUE, legend = FALSE)
+p.assimilis$iar <- plot.prob.taxon(fit.bdms, "Epeorus_assimilis", variables = "IAR", marginal.density = TRUE, legend = FALSE)
+p.assimilis$lud <- plot.prob.taxon(fit.bdms, "Epeorus_assimilis", variables = "LUD", marginal.density = TRUE, legend = FALSE)
+p.assimilis$urban <- plot.prob.taxon(fit.bdms, "Epeorus_assimilis", variables = "Urban", marginal.density = TRUE, legend = FALSE)
+p.assimilis$temp <- plot.prob.taxon(fit.bdms, "Epeorus_assimilis", variables = "Temp", marginal.density = TRUE, legend = FALSE)
+
+plot_grid(plotlist = p.alpicola)
+
+plot_grid(plotlist = p.assimilis)
+
+
+# Interesting results for E. alpicola
+# pdf('outputs/paper 2 results/P2 Epeorus comparison.pdf', height=9.5, width=14.5)
+svg('outputs/paper 2 results/P2 Epeorus comparison.svg', height=9.5, width=14.5)
+plot_grid(plotlist = list(p.alpicola$temp, p.alpicola$fv, p.alpicola$urban, map.alpicola,
+                          p.assimilis$temp, p.assimilis$lud, p.assimilis$urban, map.assimilis
+),labels=list("(a)","","","", "(b)","","",""), 
+ncol=4, rel_widths = c(1,1,1,2))
+dev.off()
+
+svg('outputs/paper 2 results/P2 Epeorus comparison.svg', height=8.75, width=24)
+g1 <- plot_grid(plotlist = list(p.alpicola$temp, p.alpicola$fv, p.alpicola$urban), ncol=3)
+g2 <- plot_grid(plotlist = list(map.alpicola), ncol=1)
+g3 <- plot_grid(plotlist = list(p.assimilis$temp, p.assimilis$lud, p.assimilis$urban, p.assimilis$iar), ncol=4)
+g4 <- plot_grid(plotlist = list(map.assimilis), ncol=1)
+
+plot_grid(g1,g2,g3,g4, labels=list("(a)", "", "(b)", ""))
+dev.off()
+
+# test 
+g <- plot.prob.taxon(fit.bdms, "Epeorus_assimilis", variables = "IAR", marginal.density = TRUE, legend = FALSE)
+
 # Plot: scatterplots ####
 pdf('P2 scatterplot by trial.pdf', onefile = TRUE)
 pairs.panels(select(prepare.inputs(c("A10m", "IAR", "LUD", "Urban", "bFRI", "FRI", "FV", "Temp", "Temp2"), sample.bdmf, center=FALSE), -SiteId, -SampId), density = TRUE, scale=FALSE, hist.col="grey", cex.cor=1.5, cex.labels=1.5, main = "BDM families")
@@ -834,11 +920,12 @@ pairs.panels(select(prepare.inputs(c("A10m", "IAR", "LUD", "Urban", "bFRI", "FRI
 dev.off()
 
 # Parameters ~ taxon. res. ####
-beta.samples.bdmf <- extract.beta(jsdm.bdmf)
-beta.samples.bdms <- extract.beta(jsdm.bdms)
+beta.samples.bdmf <- extract.beta(fit.bdmf)
+beta.samples.bdms <- extract.beta(fit.bdms)
 
 # BDMf: specify Rank, Family for each taxon, limit to EPT taxa
 beta.samples.bdmf <- beta.samples.bdmf %>%
+  as.tibble() %>%
   # group_by(Variable, Taxon) %>%
   # summarise(mean.post = mean(Value), min.post = min(Value), max.post = max(Value)) %>%
   mutate(Rank = "Family", Family = Taxon) %>%
@@ -850,13 +937,14 @@ beta.samples.bdmf <- beta.samples.bdmf %>%
 
 # BDMs: get Rank, Family  for each taxon, limit to EPT taxa
 beta.samples.bdms <- beta.samples.bdms %>%
+  as.tibble() %>%
   # group_by(Variable, Taxon) %>%
   # summarise(mean.post = mean(Value), min.post = min(Value), max.post = max(Value)) %>%
   filter(Taxon %in% unique(taxonomy.ept$Taxon)) %>%
   left_join(select(taxonomy.ept, Taxon, Rank, Family), by="Taxon") %>%
-  mutate(n=n.bdms.ept[Taxon]) %>%
-  filter(n > 56) %>%
-  select(-n)
+  mutate(n.present=n.bdms.ept[Taxon]) %>%
+  filter(n.present > 56) %>%
+  select(-n.present)
 
 plot.data <- bind_rows(beta.samples.bdmf, beta.samples.bdms)
 
@@ -870,6 +958,9 @@ plot.data$n.family <- n.bdmf.ept[plot.data$Family]
 plot.data$Label <- factor(paste(plot.data$Family, ' - ', plot.data$n.family), levels = paste(names(sort(n.bdmf.ept, decreasing = TRUE)), ' - ', sort(n.bdmf.ept, decreasing = TRUE)))
 # plot.data$Label <- factor(paste(plot.data$Family, ' - ', n.bdmf.ept[plot.data$Family]), levels = paste(names(sort(n.bdmf.ept, decreasing = TRUE)), ' - ', sort(n.bdmf.ept, decreasing = TRUE)))
 
+response.bdmf <- extract.resp(fit.bdmf)
+response.bdms <- extract.resp(fit.bdms)
+response.bdm <- bind_rows(response.bdmf, response.bdms)
 
 response.bdm.tidy <- gather(response.bdm, Variable, Response, -Taxon)
 response.bdm.tidy$Response[response.bdm.tidy$Response==0] <- "Not significant"
@@ -959,8 +1050,8 @@ print(g)
 # - get the full sample of the marginal posterior taxon-specific parameters
 # - do plot parameters with specific order (family first, then species by frequency), formatted labels, and filled significance
 # e.g., taxa <- c("Baetis_alpinus", "Baetis_rhodani", "Baetis_muticus", "Baetis_lutheri")
+# - ASSUMES fitted model for BDMf and BDMs in environment for extract.beta(), extract.resp()
 # scale argument controls degree of vertical overlap of density distributions
-library(ggridges)
 plot.beta.taxa <- function(taxa, columns, scale, size, legend.position){
   n <- c(n.bdmf, n.bdms)
   # reorder the taxa and ID the family
@@ -969,8 +1060,8 @@ plot.beta.taxa <- function(taxa, columns, scale, size, legend.position){
   family <- unique(taxonomy$Family)
   
   # Extract parameters
-  beta.samples.bdmf <- extract.beta(jsdm.bdmf)
-  beta.samples.bdms <- extract.beta(jsdm.bdms)
+  beta.samples.bdmf <- extract.beta(fit.bdmf)
+  beta.samples.bdms <- extract.beta(fit.bdms)
   
   beta.samples.bdmf <- beta.samples.bdmf %>%
     filter(Taxon == family) %>%
@@ -984,9 +1075,9 @@ plot.beta.taxa <- function(taxa, columns, scale, size, legend.position){
   beta.samples <- bind_rows(beta.samples.bdmf, beta.samples.bdms)
   
   # Extract and join significant responses
-  response.bdmf <- extract.resp(jsdm.bdmf)
+  response.bdmf <- extract.resp(fit.bdmf)
   response.bdmf <- filter(response.bdmf, Taxon != "Goeridae")
-  response.bdms <- extract.resp(jsdm.bdms)
+  response.bdms <- extract.resp(fit.bdms)
   
   responses <- bind_rows(response.bdmf, response.bdms)
   responses <- unique(responses) # eliminate duplicate responses in BDMf and BDMs
@@ -1053,7 +1144,7 @@ plot.beta.taxa <- function(taxa, columns, scale, size, legend.position){
   g
 }
 
-pdf('P2 parameters by resolution Baetidae.pdf', height=8, width=14)
+pdf('outputs/paper 2 results/P2 parameters by resolution Baetidae.pdf', height=8, width=14)
 g <- plot.beta.taxa(c("Baetis_alpinus", "Baetis_muticus", "Baetis_rhodani"), columns=5, scale=2, size=20, legend.position = "top")
 print(g)
 dev.off()
@@ -1065,7 +1156,7 @@ plot.beta.taxon(c("Protonemura_lateralis", "Nemoura_mortoni", "Amphinemura", "Ne
 # Filter EPT families by number of taxa
 families <- taxonomy.ept %>% 
   group_by(Family) %>% 
-  summarise(species=n()) %>% 
+  summarise(species=dplyr::n()) %>% 
   filter(Family %in% names(n.bdmf.ept)) %>%
   mutate(n.family = n.bdmf[Family]) %>%
   arrange(-n.family)
